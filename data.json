@@ -1,5 +1,5 @@
 {
-  "tmdbApiKey": "204ca551e30eb8971806d965437e6f6f",
+  "tmdbApiKey": "",
   "dataFile": "movies.json",
   "tvDataFile": "tvshows.json",
   "cardFields": {
