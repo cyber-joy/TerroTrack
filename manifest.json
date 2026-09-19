@@ -1,0 +1,10 @@
+{
+  "id": "movie-gallery",
+  "name": "Movie Gallery",
+  "version": "1.1.0",
+  "minAppVersion": "0.15.0",
+  "description": "A single-plugin Movie & TV tracker for Obsidian with TMDB search, rich detail views, filters, stats, and backup/import. No other plugins required.",
+  "author": "You",
+  "authorUrl": "",
+  "isDesktopOnly": false
+}

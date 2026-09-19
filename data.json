@@ -1,0 +1,43 @@
+{
+  "tmdbApiKey": "204ca551e30eb8971806d965437e6f6f",
+  "dataFile": "movies.json",
+  "tvDataFile": "tvshows.json",
+  "cardFields": {
+    "title": false,
+    "year": false,
+    "rating": false,
+    "genres": false,
+    "director": false,
+    "cast": false,
+    "status": false,
+    "release_date": false,
+    "runtime": false,
+    "language": false,
+    "budget": false,
+    "myRating": false,
+    "overview": false,
+    "notes": false
+  },
+  "cardsPerRow": "auto",
+  "cardSize": "medium",
+  "tvCardFields": {
+    "title": false,
+    "year": false,
+    "rating": false,
+    "genres": false,
+    "director": false,
+    "cast": false,
+    "status": false,
+    "release_date": false,
+    "runtime": false,
+    "language": false,
+    "seasons": false,
+    "episodes": false,
+    "network": false,
+    "myRating": false,
+    "overview": false,
+    "notes": false
+  },
+  "tvCardsPerRow": "auto",
+  "tvCardSize": "medium"
+}

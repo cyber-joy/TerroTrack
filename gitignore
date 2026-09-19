@@ -1,0 +1,13 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+
+# Never commit your own vault data if you test inside this folder
+*.json.bak
+movies.json
+tvshows.json
+movies-backup-*
+tvshows-backup-*
