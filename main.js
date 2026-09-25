@@ -120,8 +120,6 @@ class MovieGalleryPlugin extends Plugin {
   }
 
   onunload() {
-    // Release references to rendered blocks/state promptly on disable or
-    // reload, rather than waiting on garbage collection.
     this.galleryEls?.clear();
     this.galleryStates?.clear();
     this.tvGalleryStates?.clear();
@@ -131,8 +129,6 @@ class MovieGalleryPlugin extends Plugin {
   async loadSettings() {
     const data = (await this.loadData()) || {};
     this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
-    // Merge cardFields per-key so a partially saved object never loses fields
-    // that were added to the defaults after the user's last save.
     this.settings.cardFields = Object.assign({}, DEFAULT_SETTINGS.cardFields, data.cardFields || {});
     this.settings.tvCardFields = Object.assign({}, DEFAULT_SETTINGS.tvCardFields, data.tvCardFields || {});
   }
@@ -253,7 +249,7 @@ class MovieGalleryPlugin extends Plugin {
     }
   }
 
-  // ---------- TV shows (parallel to the movie methods above) ----------
+  // ---------- TV shows ----------
 
   async readShows() {
     const path = this.settings.tvDataFile;
@@ -662,7 +658,7 @@ class MovieGalleryPlugin extends Plugin {
 
     for (let i = 0; i < movies.length; i++) {
       const m = movies[i];
-      if (typeof m.id !== "number") continue; // skip any non-TMDB entries
+      if (typeof m.id !== "number") continue;
 
       try {
         const fresh = await this.fetchMovieDetails(m.id, m);
@@ -676,7 +672,6 @@ class MovieGalleryPlugin extends Plugin {
       }
 
       if (onProgress) onProgress(i + 1, total);
-      // Throttle so we stay well under TMDB's rate limits during bulk refresh
       await new Promise((resolve) => setTimeout(resolve, 300));
     }
 
@@ -711,7 +706,6 @@ class MovieGalleryPlugin extends Plugin {
     const filename = `movies-backup-${timestamp}.${ext}`;
     const content = format === "csv" ? this.buildCsvBackup(movies) : this.buildTxtBackup(movies);
 
-    // Desktop: let the person choose exactly where to save via the OS file dialog.
     if (Platform.isDesktopApp) {
       try {
         const electron = require("electron");
@@ -734,7 +728,7 @@ class MovieGalleryPlugin extends Plugin {
               filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
             }))?.filePath;
 
-        if (!result) return null; // cancelled
+        if (!result) return null;
         fs.writeFileSync(result, content, "utf-8");
         return result;
       } catch (e) {
@@ -743,7 +737,6 @@ class MovieGalleryPlugin extends Plugin {
       }
     }
 
-    // Mobile, or desktop fallback: write into the vault root (no OS file picker available there).
     await this.app.vault.adapter.write(filename, content);
     return filename;
   }
@@ -795,7 +788,6 @@ class MovieGalleryPlugin extends Plugin {
       ? (rated.reduce((sum, m) => sum + parseFloat(m.myRating), 0) / rated.length).toFixed(1)
       : null;
 
-    // --- Viewing habits: what you actually watch most ---
     const topOf = (arr, extract) => {
       const counts = {};
       for (const item of arr) {
@@ -888,6 +880,134 @@ class MovieGalleryPlugin extends Plugin {
     };
   }
 
+  // Attaches a small "×" clear button to a search input. The button
+  // only shows when the input has content.
+  attachSearchClear(inputEl) {
+    const parent = inputEl.parentElement;
+    if (!parent) return;
+    if (parent.classList.contains("movie-gallery-search-wrap")) return;
+
+    const wrap = document.createElement("div");
+    wrap.className = "movie-gallery-search-wrap";
+    parent.insertBefore(wrap, inputEl);
+    wrap.appendChild(inputEl);
+
+    const clearBtn = document.createElement("button");
+    clearBtn.type = "button";
+    clearBtn.className = "movie-gallery-search-clear";
+    clearBtn.setAttribute("aria-label", "Clear search");
+    clearBtn.innerHTML = "×";
+    wrap.appendChild(clearBtn);
+
+    const syncVisibility = () => {
+      clearBtn.classList.toggle("is-visible", inputEl.value.length > 0);
+    };
+    inputEl.addEventListener("input", syncVisibility);
+    syncVisibility();
+
+    clearBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!inputEl.value) return;
+      inputEl.value = "";
+      inputEl.dispatchEvent(new Event("input", { bubbles: true }));
+      inputEl.focus();
+    });
+  }
+
+  // Builds the SVG markup for the rating trend line.
+  // ratings: array of numbers in insertion order.
+  // Downsamples to at most 40 plotted points so the line stays readable
+  // no matter how large the library grows.
+  buildRatingTrendSvg(ratings) {
+    const allValues = ratings;
+    if (allValues.length < 2) return null;
+
+    const maxPoints = 40;
+    let values;
+    if (allValues.length <= maxPoints) {
+      values = allValues;
+    } else {
+      const step = allValues.length / (maxPoints - 1);
+      values = [];
+      for (let i = 0; i < maxPoints - 1; i++) {
+        values.push(allValues[Math.floor(i * step)]);
+      }
+      values.push(allValues[allValues.length - 1]);
+    }
+
+    const width = 500;
+    const height = 55;
+    const padTop = 6;
+    const padBottom = 14;
+    const padLeft = 2;
+    const padRight = 2;
+
+    const plotW = width - padLeft - padRight;
+    const plotH = height - padTop - padBottom;
+
+    const minV = Math.min(...values);
+    const maxV = Math.max(...values);
+    const span = Math.max(1, maxV - minV);
+    const domainMin = Math.max(0, minV - span * 0.2);
+    const domainMax = Math.min(10, maxV + span * 0.2);
+    const domainSpan = Math.max(0.5, domainMax - domainMin);
+
+    const x = (i) => padLeft + (i / (values.length - 1)) * plotW;
+    const y = (v) => padTop + plotH - ((v - domainMin) / domainSpan) * plotH;
+
+    const points = values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`);
+    const linePath = "M " + points.join(" L ");
+
+    const baselineY = padTop + plotH;
+    const areaPath =
+      `M ${x(0).toFixed(1)},${baselineY.toFixed(1)} ` +
+      "L " + points.join(" L ") +
+      ` L ${x(values.length - 1).toFixed(1)},${baselineY.toFixed(1)} Z`;
+
+    const dotIndexes = [
+      0,
+      Math.floor(values.length * 0.25),
+      Math.floor(values.length * 0.5),
+      Math.floor(values.length * 0.75),
+      values.length - 1,
+    ];
+    const uniqueDotIndexes = [...new Set(dotIndexes)];
+
+    const dots = uniqueDotIndexes
+      .map((i) => {
+        const isLast = i === values.length - 1;
+        const cx = x(i).toFixed(1);
+        const cy = y(values[i]).toFixed(1);
+        if (isLast) {
+          return `<circle cx="${cx}" cy="${cy}" r="3" fill="#eab308" stroke="#fff" stroke-width="1.5" />`;
+        }
+        return `<circle cx="${cx}" cy="${cy}" r="2" fill="#eab308" stroke="#1e1e1e" stroke-width="1.2" />`;
+      })
+      .join("");
+
+    const firstLabel = "1st";
+    const lastLabel = `${allValues.length}th`;
+    const lastLabelX = x(values.length - 1).toFixed(1);
+    const gradId = "mg-trend-grad-" + Math.random().toString(36).slice(2, 8);
+
+    return `
+      <svg class="mg-trend-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="height: ${height}px;">
+        <defs>
+          <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#eab308" stop-opacity="0.38"/>
+            <stop offset="100%" stop-color="#eab308" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <path d="${areaPath}" fill="url(#${gradId})" />
+        <path d="${linePath}" fill="none" stroke="#eab308" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" />
+        ${dots}
+        <text x="${padLeft}" y="${height - 2}" fill="rgba(255,255,255,0.4)" font-size="9" font-family="inherit">${firstLabel}</text>
+        <text x="${lastLabelX}" y="${height - 2}" fill="rgba(255,255,255,0.6)" font-size="9" font-family="inherit" font-weight="600" text-anchor="end">${lastLabel}</text>
+      </svg>
+    `;
+  }
+
   parseCsv(text) {
     const lines = text.trim().split(/\r?\n/);
     if (!lines.length) return [];
@@ -935,11 +1055,9 @@ class MovieGalleryPlugin extends Plugin {
     return "native";
   }
 
-  // IMDb ratings/watchlist exports mix movies and TV together in one file,
-  // distinguished only by this column — used so each importer only picks up its own kind.
   imdbRowMatchesKind(row, kind) {
     const type = (row["Title Type"] || "").trim();
-    if (!type) return true; // no type column — don't filter, let it through
+    if (!type) return true;
     const movieTypes = ["movie", "tvMovie", "video", "short"];
     const tvTypes = ["tvSeries", "tvMiniSeries", "tvSpecial"];
     return kind === "tv" ? tvTypes.includes(type) : movieTypes.includes(type);
@@ -1004,7 +1122,6 @@ class MovieGalleryPlugin extends Plugin {
     } catch (e) {
       console.error("Movie Gallery: IMDb id lookup failed for", title, e);
     }
-    // Fall back to a title/year search, keeping IMDb's own metadata as a backstop
     return this.resolveViaSearch(title, year, overlay);
   }
 
@@ -1105,7 +1222,7 @@ class MovieGalleryPlugin extends Plugin {
       }
 
       if (onProgress) onProgress(i + 1, rows.length);
-      if (format !== "native") await new Promise((resolve) => setTimeout(resolve, 300)); // throttle TMDB calls
+      if (format !== "native") await new Promise((resolve) => setTimeout(resolve, 300));
     }
 
     await this.writeMovies(existing);
@@ -1185,9 +1302,6 @@ class MovieGalleryPlugin extends Plugin {
         break;
     }
 
-    // When actively searching, bring title matches to the top ahead of
-    // director/cast-only matches, without disturbing the chosen sort
-    // order within each group (Array.sort is stable).
     if (q) {
       result = result
         .map((m, i) => ({ m, i, titleMatch: m.title.toLowerCase().includes(q) }))
@@ -1269,7 +1383,6 @@ class MovieGalleryPlugin extends Plugin {
       new Set(allMovies.map((m) => m.runtime).filter((r) => r != null))
     ).sort((a, b) => a - b);
 
-    // --- Header row ---
     const header = el.createDiv({ cls: "movie-gallery-header" });
     header.createDiv({ cls: "movie-gallery-heading", text: "🎬 Movie Library" });
     const headerActions = header.createDiv({ cls: "movie-gallery-header-actions" });
@@ -1291,7 +1404,6 @@ class MovieGalleryPlugin extends Plugin {
     });
     settingsBtn.addEventListener("click", () => new GallerySettingsModal(this.app, this).open());
 
-    // --- Toolbar row: search + primary filters ---
     const toolbar = el.createDiv({ cls: "movie-gallery-toolbar" });
 
     const searchInput = toolbar.createEl("input", {
@@ -1300,6 +1412,8 @@ class MovieGalleryPlugin extends Plugin {
       attr: { placeholder: "Search title, director, or cast..." },
     });
     searchInput.value = state.search;
+    this.attachSearchClear(searchInput);
+
     let movieSearchDebounce = null;
     searchInput.addEventListener("input", () => {
       clearTimeout(movieSearchDebounce);
@@ -1363,7 +1477,6 @@ class MovieGalleryPlugin extends Plugin {
       '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="4,4 20,4 14,12 14,19 10,21 10,12"/></svg>';
     moreBtn.toggleClass("active", state.moreOpen);
 
-    // --- Filters row (collapsible, flat single-dropdown-per-field) ---
     const morePanel = el.createDiv({ cls: "movie-gallery-more-panel" });
     morePanel.toggleClass("open", state.moreOpen);
 
@@ -1442,7 +1555,6 @@ class MovieGalleryPlugin extends Plugin {
       this.renderMovieSection(el, stateKey);
     });
 
-    // --- Grid ---
     const countEl = el.createDiv({ cls: "movie-gallery-count" });
     const grid = el.createDiv({ cls: "movie-gallery-grid" });
 
@@ -1478,9 +1590,6 @@ class MovieGalleryPlugin extends Plugin {
         const posterUrl = getPosterUrl(m);
         const posterImg = card.createEl("img", { attr: { src: posterUrl, alt: m.title, loading: "lazy" } });
         const openModal = () => new MovieDetailModal(this.app, this, m).open();
-        // Intercept the click on the image itself so it never bubbles up to
-        // Obsidian's own click-to-zoom image handler (which would otherwise
-        // open its zoom overlay on top of / behind our modal at the same time).
         posterImg.addEventListener("click", (e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -1565,7 +1674,6 @@ class MovieGalleryPlugin extends Plugin {
       b.localeCompare(a)
     );
 
-    // --- Header ---
     const header = el.createDiv({ cls: "movie-gallery-header" });
     header.createDiv({ cls: "movie-gallery-heading", text: "📺 TV Library" });
     const headerActions = header.createDiv({ cls: "movie-gallery-header-actions" });
@@ -1586,7 +1694,6 @@ class MovieGalleryPlugin extends Plugin {
     });
     settingsBtn.addEventListener("click", () => new TvGallerySettingsModal(this.app, this).open());
 
-    // --- Toolbar ---
     const toolbar = el.createDiv({ cls: "movie-gallery-toolbar" });
     const searchInput = toolbar.createEl("input", {
       type: "text",
@@ -1594,6 +1701,8 @@ class MovieGalleryPlugin extends Plugin {
       attr: { placeholder: "Search title, creator, or cast..." },
     });
     searchInput.value = state.search;
+    this.attachSearchClear(searchInput);
+
     let tvSearchDebounce = null;
     searchInput.addEventListener("input", () => {
       clearTimeout(tvSearchDebounce);
@@ -1654,7 +1763,6 @@ class MovieGalleryPlugin extends Plugin {
       '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="4,4 20,4 14,12 14,19 10,21 10,12"/></svg>';
     moreBtn.toggleClass("active", state.moreOpen);
 
-    // --- Filters panel ---
     const morePanel = el.createDiv({ cls: "movie-gallery-more-panel" });
     morePanel.toggleClass("open", state.moreOpen);
 
@@ -1713,7 +1821,6 @@ class MovieGalleryPlugin extends Plugin {
       this.renderTvSection(el, stateKey);
     });
 
-    // --- Grid ---
     const countEl = el.createDiv({ cls: "movie-gallery-count" });
     const grid = el.createDiv({ cls: "movie-gallery-grid" });
 
@@ -1769,7 +1876,6 @@ class MovieGalleryPlugin extends Plugin {
           shows = shows.slice().reverse();
       }
 
-      // Title matches float to the top of the results while searching.
       if (q) {
         shows = shows
           .map((s, i) => ({ s, i, titleMatch: (s.name || "").toLowerCase().includes(q) }))
@@ -1866,7 +1972,6 @@ class AddMovieModal extends Modal {
     contentEl.addClass("movie-add-modal");
     contentEl.createEl("h2", { text: "Add Movie" });
 
-    // --- Search section ---
     if (this.plugin.settings.tmdbApiKey) {
       contentEl.createEl("div", { cls: "movie-add-label", text: "Search Movie Database" });
       const input = contentEl.createEl("input", {
@@ -1912,11 +2017,9 @@ class AddMovieModal extends Modal {
       });
     }
 
-    // --- Divider ---
     const divider = contentEl.createDiv({ cls: "movie-add-divider" });
     divider.createSpan({ text: "OR ENTER MANUALLY" });
 
-    // --- Manual template form ---
     const form = contentEl.createDiv({ cls: "movie-add-form" });
     const draft = {
       title: "",
@@ -1979,7 +2082,6 @@ class AddMovieModal extends Modal {
     addField(makeRow(true), "Overview", "overview", { type: "textarea", placeholder: "Short overview..." });
     addField(makeRow(true), "Notes", "notes", { type: "textarea", placeholder: "Personal notes..." });
 
-    // --- Buttons ---
     const actions = contentEl.createDiv({ cls: "movie-add-actions" });
     const cancelBtn = actions.createEl("button", { text: "Cancel", cls: "movie-add-cancel" });
     cancelBtn.addEventListener("click", () => this.close());
@@ -2075,7 +2177,6 @@ class AddShowModal extends Modal {
     contentEl.addClass("movie-add-modal");
     contentEl.createEl("h2", { text: "Add TV Show" });
 
-    // --- Search section ---
     if (this.plugin.settings.tmdbApiKey) {
       contentEl.createEl("div", { cls: "movie-add-label", text: "Search TV Database" });
       const input = contentEl.createEl("input", {
@@ -2121,11 +2222,9 @@ class AddShowModal extends Modal {
       });
     }
 
-    // --- Divider ---
     const divider = contentEl.createDiv({ cls: "movie-add-divider" });
     divider.createSpan({ text: "OR ENTER MANUALLY" });
 
-    // --- Manual template form ---
     const form = contentEl.createDiv({ cls: "movie-add-form" });
     const draft = {
       name: "",
@@ -2194,7 +2293,6 @@ class AddShowModal extends Modal {
     addField(makeRow(true), "Overview", "overview", { type: "textarea", placeholder: "Short overview..." });
     addField(makeRow(true), "Notes", "notes", { type: "textarea", placeholder: "Personal notes..." });
 
-    // --- Buttons ---
     const actions = contentEl.createDiv({ cls: "movie-add-actions" });
     const cancelBtn = actions.createEl("button", { text: "Cancel", cls: "movie-add-cancel" });
     cancelBtn.addEventListener("click", () => this.close());
@@ -2287,9 +2385,6 @@ class MovieDetailModal extends Modal {
 
   onOpen() {
     this.renderView();
-    // Obsidian auto-focuses the first focusable control in the modal, which
-    // lands on the My Rating <select> and shows a focus ring around it.
-    // Steal focus back to the modal container itself right after render.
     this.contentEl.setAttribute("tabindex", "-1");
     requestAnimationFrame(() => this.contentEl.focus({ preventScroll: true }));
   }
@@ -2308,52 +2403,39 @@ class MovieDetailModal extends Modal {
 
     info.createEl("h2", { text: m.title, cls: "movie-detail-title" });
 
-    // --- Badge line: year · rating pill ---
-    const badgeLine = info.createDiv({ cls: "movie-detail-badges" });
-    badgeLine.createSpan({ cls: "movie-detail-year", text: m.year });
-    badgeLine.createSpan({ cls: "movie-detail-dot", text: "•" });
-    badgeLine.createSpan({ cls: "movie-detail-rating-pill", text: `★ ${m.rating}` });
+    const subtitleRow = info.createDiv({ cls: "movie-detail-subtitle" });
+    if (m.year) subtitleRow.createSpan({ cls: "movie-detail-subtitle-year", text: m.year });
+    if (m.year) subtitleRow.createSpan({ cls: "movie-detail-subtitle-dot", text: "·" });
+    subtitleRow.createSpan({ cls: "movie-detail-rating-pill", text: `★ ${m.rating}` });
 
     if (m.overview) {
       info.createEl("p", { text: m.overview, cls: "movie-detail-overview-lead" });
     }
 
-    // --- Compact facts grid: each chip sizes to its own content, wraps naturally ---
-    const chipGrid = info.createDiv({ cls: "movie-detail-chip-grid" });
-    const addChip = (label, value) => {
+    if (m.genres) {
+      const genreRow = info.createDiv({ cls: "movie-detail-chip-row" });
+      m.genres.split(",").map((g) => g.trim()).filter(Boolean)
+        .forEach((g) => genreRow.createSpan({ cls: "movie-detail-genre-pill", text: g }));
+    }
+
+    const facts = contentEl.createDiv({ cls: "movie-detail-facts" });
+
+    const addFact = (label, value) => {
       if (!value) return;
-      const chip = chipGrid.createDiv({ cls: "movie-detail-chip" });
-      chip.createDiv({ cls: "movie-detail-chip-label", text: label });
-      chip.createDiv({ cls: "movie-detail-chip-value", text: value });
+      const f = facts.createDiv({ cls: "movie-detail-fact" });
+      f.createDiv({ cls: "movie-detail-fact-label", text: label });
+      f.createDiv({ cls: "movie-detail-fact-value", text: value });
     };
 
-    addChip("📅 Release Date", this.plugin.formatDate(m.release_date));
-    addChip("⏱️ Runtime", this.plugin.formatRuntime(m.runtime));
-    addChip("Language", this.plugin.languageName(m.original_language));
-    addChip("💰 Budget", this.plugin.formatBudget(m.budget));
-    addChip("Genres", m.genres);
-    addChip("Director", m.director);
+    addFact("Director", m.director);
+    addFact("Release Date", this.plugin.formatDate(m.release_date));
+    addFact("Runtime", this.plugin.formatRuntime(m.runtime));
+    addFact("Language", this.plugin.languageName(m.original_language));
+    addFact("Budget", this.plugin.formatBudget(m.budget));
 
-    // --- My Rating: normal chip, left ---
-    const myRatingChip = chipGrid.createDiv({ cls: "movie-detail-chip" });
-    myRatingChip.createDiv({ cls: "movie-detail-chip-label", text: "My Rating" });
-    const myRatingSelect = myRatingChip.createEl("select", { cls: "movie-detail-inline-select" });
-    myRatingSelect.createEl("option", { text: "Not Rated", attr: { value: "" } });
-    for (let i = 0; i <= 10; i++) {
-      const opt = myRatingSelect.createEl("option", { text: String(i), attr: { value: String(i) } });
-      if (String(m.myRating || "") === String(i)) opt.selected = true;
-    }
-    myRatingSelect.value = m.myRating || "";
-    myRatingSelect.addEventListener("change", async () => {
-      m.myRating = myRatingSelect.value;
-      await this.plugin.updateMovie(m);
-      this.renderView();
-    });
-
-    // --- Status: own chip, right, sized to its own content (not stretched) ---
-    const statusChip = chipGrid.createDiv({ cls: "movie-detail-chip movie-detail-chip-snug" });
-    statusChip.createDiv({ cls: "movie-detail-chip-label", text: "Status" });
-    const statusPill = statusChip.createDiv({
+    const statusFact = facts.createDiv({ cls: "movie-detail-fact" });
+    statusFact.createDiv({ cls: "movie-detail-fact-label", text: "Status" });
+    const statusPill = statusFact.createDiv({
       cls: "movie-detail-status-pill" + (m.watched ? " is-watched" : ""),
       text: m.watched ? "Watched" : "To Watch",
     });
@@ -2363,29 +2445,50 @@ class MovieDetailModal extends Modal {
       this.renderView();
     });
 
-    // --- Cast: full-width, own row (avoids stretching short chips) ---
-    if (m.cast) {
-      const castChip = info.createDiv({ cls: "movie-detail-chip movie-detail-chip-full" });
-      castChip.createDiv({ cls: "movie-detail-chip-label", text: "Cast" });
-      castChip.createDiv({ cls: "movie-detail-chip-value", text: m.cast });
-    }
+    const ratingFact = facts.createDiv({ cls: "movie-detail-fact movie-detail-fact-full" });
+    ratingFact.createDiv({ cls: "movie-detail-fact-label", text: "My Rating" });
+    const ratingWrap = ratingFact.createDiv({ cls: "movie-rating-picker" });
 
-    if (m.notes) {
-      info.createEl("h3", { text: "Notes", cls: "movie-detail-section-title" });
-      info.createDiv({ cls: "movie-detail-text-box movie-detail-notes-box" }).createEl("p", {
-        text: m.notes,
-        cls: "movie-detail-overview",
+    const currentVal = m.myRating !== "" && m.myRating != null ? String(m.myRating) : "";
+
+    ratingWrap.createDiv({
+      cls: "movie-rating-current" + (currentVal === "" ? " is-empty" : ""),
+      text: currentVal === "" ? "—" : currentVal,
+    });
+
+    const optionsRow = ratingWrap.createDiv({ cls: "movie-rating-options" });
+    for (let i = 0; i <= 10; i++) {
+      const box = optionsRow.createDiv({ cls: "movie-rating-option", text: String(i) });
+      box.dataset.value = String(i);
+      if (String(i) === currentVal) box.addClass("is-selected");
+      box.addEventListener("click", async () => {
+        const clicked = String(i);
+        const newVal = clicked === currentVal ? "" : clicked;
+        m.myRating = newVal;
+        await this.plugin.updateMovie(m);
+        this.renderView();
       });
     }
 
-    const actions = info.createDiv({ cls: "movie-detail-actions" });
+    if (m.cast) {
+      const castFact = facts.createDiv({ cls: "movie-detail-fact movie-detail-fact-full movie-detail-fact-trailing" });
+      castFact.createDiv({ cls: "movie-detail-fact-label", text: "Cast" });
+      castFact.createDiv({ cls: "movie-detail-fact-value", text: m.cast });
+    }
+
+    if (m.notes) {
+      const notesFact = facts.createDiv({ cls: "movie-detail-fact movie-detail-fact-full movie-detail-fact-notes" });
+      notesFact.createDiv({ cls: "movie-detail-fact-label", text: "Notes" });
+      notesFact.createDiv({ cls: "movie-detail-fact-value", text: m.notes });
+    }
+
+    const actions = contentEl.createDiv({ cls: "movie-detail-actions" });
     if (m.trailer_key) {
       const trailerBtn = actions.createEl("button", { text: "▶ Watch Trailer", cls: "movie-detail-trailer-btn" });
       trailerBtn.addEventListener("click", () => {
         window.open(`https://www.youtube.com/watch?v=${m.trailer_key}`, "_blank");
       });
     }
-
     const editBtn = actions.createEl("button", { text: "✎ Edit", cls: "movie-detail-edit-btn" });
     editBtn.addEventListener("click", () => this.renderEdit());
 
@@ -2397,7 +2500,6 @@ class MovieDetailModal extends Modal {
       }
     });
 
-    // --- Similar movies ---
     const similarSection = contentEl.createDiv({ cls: "movie-detail-similar-section" });
     similarSection.createEl("h3", { text: "Similar Movies", cls: "movie-detail-section-title" });
     const similarList = similarSection.createDiv({ cls: "movie-detail-similar-list" });
@@ -2570,53 +2672,40 @@ class TvDetailModal extends Modal {
 
     info.createEl("h2", { text: s.name, cls: "movie-detail-title" });
 
-    // --- Badge line: year · rating pill ---
-    const badgeLine = info.createDiv({ cls: "movie-detail-badges" });
-    badgeLine.createSpan({ cls: "movie-detail-year", text: s.year });
-    badgeLine.createSpan({ cls: "movie-detail-dot", text: "•" });
-    badgeLine.createSpan({ cls: "movie-detail-rating-pill", text: `★ ${s.rating}` });
+    const subtitleRow = info.createDiv({ cls: "movie-detail-subtitle" });
+    if (s.year) subtitleRow.createSpan({ cls: "movie-detail-subtitle-year", text: s.year });
+    if (s.year) subtitleRow.createSpan({ cls: "movie-detail-subtitle-dot", text: "·" });
+    subtitleRow.createSpan({ cls: "movie-detail-rating-pill", text: `★ ${s.rating}` });
 
     if (s.overview) {
       info.createEl("p", { text: s.overview, cls: "movie-detail-overview-lead" });
     }
 
-    // --- Compact facts grid ---
-    const chipGrid = info.createDiv({ cls: "movie-detail-chip-grid" });
-    const addChip = (label, value) => {
+    if (s.genres) {
+      const genreRow = info.createDiv({ cls: "movie-detail-chip-row" });
+      s.genres.split(",").map((g) => g.trim()).filter(Boolean)
+        .forEach((g) => genreRow.createSpan({ cls: "movie-detail-genre-pill", text: g }));
+    }
+
+    const facts = contentEl.createDiv({ cls: "movie-detail-facts" });
+
+    const addFact = (label, value) => {
       if (!value) return;
-      const chip = chipGrid.createDiv({ cls: "movie-detail-chip" });
-      chip.createDiv({ cls: "movie-detail-chip-label", text: label });
-      chip.createDiv({ cls: "movie-detail-chip-value", text: value });
+      const f = facts.createDiv({ cls: "movie-detail-fact" });
+      f.createDiv({ cls: "movie-detail-fact-label", text: label });
+      f.createDiv({ cls: "movie-detail-fact-value", text: value });
     };
 
-    addChip("📅 First Air Date", this.plugin.formatDate(s.first_air_date));
-    addChip("⏱️ Episode Runtime", this.plugin.formatRuntime(s.episode_runtime));
-    addChip("Language", this.plugin.languageName(s.original_language));
-    addChip("🗂️ Seasons", s.number_of_seasons ? String(s.number_of_seasons) : "");
-    addChip("Series Status", s.show_status);
-    addChip("Genres", s.genres);
-    addChip("Creator", s.creators);
+    addFact("Creator", s.creators);
+    addFact("First Air Date", this.plugin.formatDate(s.first_air_date));
+    addFact("Episode Runtime", this.plugin.formatRuntime(s.episode_runtime));
+    addFact("Language", this.plugin.languageName(s.original_language));
+    addFact("Seasons", s.number_of_seasons ? String(s.number_of_seasons) : "");
+    addFact("Series Status", s.show_status);
 
-    // --- My Rating: normal chip, left ---
-    const myRatingChip = chipGrid.createDiv({ cls: "movie-detail-chip" });
-    myRatingChip.createDiv({ cls: "movie-detail-chip-label", text: "My Rating" });
-    const myRatingSelect = myRatingChip.createEl("select", { cls: "movie-detail-inline-select" });
-    myRatingSelect.createEl("option", { text: "Not Rated", attr: { value: "" } });
-    for (let i = 0; i <= 10; i++) {
-      const opt = myRatingSelect.createEl("option", { text: String(i), attr: { value: String(i) } });
-      if (String(s.myRating || "") === String(i)) opt.selected = true;
-    }
-    myRatingSelect.value = s.myRating || "";
-    myRatingSelect.addEventListener("change", async () => {
-      s.myRating = myRatingSelect.value;
-      await this.plugin.updateShow(s);
-      this.renderView();
-    });
-
-    // --- Status: own chip, right, sized to its own content ---
-    const statusChip = chipGrid.createDiv({ cls: "movie-detail-chip movie-detail-chip-snug" });
-    statusChip.createDiv({ cls: "movie-detail-chip-label", text: "Status" });
-    const statusPill = statusChip.createDiv({
+    const statusFact = facts.createDiv({ cls: "movie-detail-fact" });
+    statusFact.createDiv({ cls: "movie-detail-fact-label", text: "Status" });
+    const statusPill = statusFact.createDiv({
       cls: "movie-detail-status-pill" + (s.watched ? " is-watched" : ""),
       text: s.watched ? "Watched" : "To Watch",
     });
@@ -2626,24 +2715,48 @@ class TvDetailModal extends Modal {
       this.renderView();
     });
 
-    // --- Episode progress: full-width, editable count + bar ---
+    const ratingFact = facts.createDiv({ cls: "movie-detail-fact movie-detail-fact-full" });
+    ratingFact.createDiv({ cls: "movie-detail-fact-label", text: "My Rating" });
+    const ratingWrap = ratingFact.createDiv({ cls: "movie-rating-picker" });
+
+    const currentVal = s.myRating !== "" && s.myRating != null ? String(s.myRating) : "";
+
+    ratingWrap.createDiv({
+      cls: "movie-rating-current" + (currentVal === "" ? " is-empty" : ""),
+      text: currentVal === "" ? "—" : currentVal,
+    });
+
+    const optionsRow = ratingWrap.createDiv({ cls: "movie-rating-options" });
+    for (let i = 0; i <= 10; i++) {
+      const box = optionsRow.createDiv({ cls: "movie-rating-option", text: String(i) });
+      box.dataset.value = String(i);
+      if (String(i) === currentVal) box.addClass("is-selected");
+      box.addEventListener("click", async () => {
+        const clicked = String(i);
+        const newVal = clicked === currentVal ? "" : clicked;
+        s.myRating = newVal;
+        await this.plugin.updateShow(s);
+        this.renderView();
+      });
+    }
+
     const total = s.number_of_episodes || 0;
-    const progressChip = chipGrid.createDiv({ cls: "movie-detail-chip movie-detail-chip-full" });
-    progressChip.createDiv({ cls: "movie-detail-chip-label", text: "🎞️ Episodes Watched" });
-    const progressRow = progressChip.createDiv({ cls: "movie-detail-progress-row" });
-    const epInput = progressRow.createEl("input", {
+    const epFact = facts.createDiv({ cls: "movie-detail-fact movie-detail-fact-full movie-detail-fact-trailing" });
+    epFact.createDiv({ cls: "movie-detail-fact-label", text: "Episodes Watched" });
+    const epRow = epFact.createDiv({ cls: "movie-detail-progress-row" });
+    const epInput = epRow.createEl("input", {
       type: "number",
       cls: "movie-detail-inline-select movie-detail-episode-input",
       attr: { min: "0", ...(total ? { max: String(total) } : {}) },
     });
     epInput.value = String(s.episodesWatched || 0);
-    progressRow.createSpan({ cls: "movie-detail-progress-total", text: total ? `/ ${total} episodes` : "episodes" });
+    if (total) epRow.createSpan({ cls: "movie-detail-progress-total", text: `/ ${total} episodes` });
 
-    const progressBarTrack = progressChip.createDiv({ cls: "movie-detail-progress-track" });
-    const progressBarFill = progressBarTrack.createDiv({ cls: "movie-detail-progress-fill" });
+    const progressTrack = epFact.createDiv({ cls: "movie-detail-progress-track" });
+    const progressFill = progressTrack.createDiv({ cls: "movie-detail-progress-fill" });
     const pct = total ? Math.min(100, ((s.episodesWatched || 0) / total) * 100) : 0;
-    progressBarFill.style.width = `${pct}%`;
-    if (!total) progressBarTrack.style.display = "none";
+    progressFill.style.width = `${pct}%`;
+    if (!total) progressTrack.style.display = "none";
 
     const commitEpisodes = async () => {
       let val = parseInt(epInput.value, 10);
@@ -2657,29 +2770,25 @@ class TvDetailModal extends Modal {
     };
     epInput.addEventListener("change", commitEpisodes);
 
-    // --- Cast: full-width, own row ---
     if (s.cast) {
-      const castChip = info.createDiv({ cls: "movie-detail-chip movie-detail-chip-full" });
-      castChip.createDiv({ cls: "movie-detail-chip-label", text: "Cast" });
-      castChip.createDiv({ cls: "movie-detail-chip-value", text: s.cast });
+      const castFact = facts.createDiv({ cls: "movie-detail-fact movie-detail-fact-full" });
+      castFact.createDiv({ cls: "movie-detail-fact-label", text: "Cast" });
+      castFact.createDiv({ cls: "movie-detail-fact-value", text: s.cast });
     }
 
     if (s.notes) {
-      info.createEl("h3", { text: "Notes", cls: "movie-detail-section-title" });
-      info.createDiv({ cls: "movie-detail-text-box movie-detail-notes-box" }).createEl("p", {
-        text: s.notes,
-        cls: "movie-detail-overview",
-      });
+      const notesFact = facts.createDiv({ cls: "movie-detail-fact movie-detail-fact-full movie-detail-fact-notes" });
+      notesFact.createDiv({ cls: "movie-detail-fact-label", text: "Notes" });
+      notesFact.createDiv({ cls: "movie-detail-fact-value", text: s.notes });
     }
 
-    const actions = info.createDiv({ cls: "movie-detail-actions" });
+    const actions = contentEl.createDiv({ cls: "movie-detail-actions" });
     if (s.trailer_key) {
       const trailerBtn = actions.createEl("button", { text: "▶ Watch Trailer", cls: "movie-detail-trailer-btn" });
       trailerBtn.addEventListener("click", () => {
         window.open(`https://www.youtube.com/watch?v=${s.trailer_key}`, "_blank");
       });
     }
-
     const editBtn = actions.createEl("button", { text: "✎ Edit", cls: "movie-detail-edit-btn" });
     editBtn.addEventListener("click", () => this.renderEdit());
 
@@ -2691,7 +2800,6 @@ class TvDetailModal extends Modal {
       }
     });
 
-    // --- Similar shows ---
     const similarSection = contentEl.createDiv({ cls: "movie-detail-similar-section" });
     similarSection.createEl("h3", { text: "Similar Shows", cls: "movie-detail-section-title" });
     const similarList = similarSection.createDiv({ cls: "movie-detail-similar-list" });
@@ -2892,9 +3000,9 @@ class GallerySettingsModal extends Modal {
 
     fieldLabels.forEach(([key, label]) => {
       const item = fieldsWrap.createEl("label", { cls: "movie-gallery-checkbox-item" });
+      item.createSpan({ cls: "movie-gallery-checkbox-label", text: label });
       const checkbox = item.createEl("input", { type: "checkbox" });
       checkbox.checked = !!this.plugin.settings.cardFields[key];
-      item.createSpan({ text: label });
       checkbox.addEventListener("change", async () => {
         this.plugin.settings.cardFields[key] = checkbox.checked;
         await this.plugin.saveSettings();
@@ -2902,43 +3010,48 @@ class GallerySettingsModal extends Modal {
       });
     });
 
-    contentEl.createEl("h3", { text: "Layout", cls: "movie-gallery-settings-section-title" });
-    const layoutRow = contentEl.createDiv({ cls: "movie-gallery-layout-row" });
+    contentEl.createDiv({ cls: "movie-gallery-settings-divider" });
+    contentEl.createEl("h3", { text: "Gallery Layout", cls: "movie-gallery-settings-section-title" });
+    const layoutWrap = contentEl.createDiv({ cls: "movie-gallery-settings-rows" });
 
-    const layoutField = (parent, label) => {
-      const group = parent.createDiv({ cls: "movie-gallery-layout-field" });
-      group.createDiv({ cls: "movie-add-label", text: label });
-      return group;
+    const layoutRow = (labelText, createControl) => {
+      const row = layoutWrap.createDiv({ cls: "movie-gallery-settings-row" });
+      row.createDiv({ cls: "movie-gallery-settings-row-label", text: labelText });
+      const controlWrap = row.createDiv({ cls: "movie-gallery-settings-row-control" });
+      createControl(controlWrap);
     };
 
-    const rowsGroup = layoutField(layoutRow, "Cards per row");
-    const rowsDrop = rowsGroup.createEl("select");
-    ["auto", "2", "3", "4", "5", "6", "7", "8"].forEach((v) => {
-      const opt = rowsDrop.createEl("option", { text: v === "auto" ? "Auto" : v, attr: { value: v } });
-      if (String(this.plugin.settings.cardsPerRow) === v) opt.selected = true;
-    });
-    rowsDrop.addEventListener("change", async () => {
-      this.plugin.settings.cardsPerRow = rowsDrop.value;
-      await this.plugin.saveSettings();
-      this.plugin.refreshGalleries();
-    });
-
-    const sizeGroup = layoutField(layoutRow, "Card size");
-    const sizeDrop = sizeGroup.createEl("select");
-    [
-      ["small", "Small"],
-      ["medium", "Medium"],
-      ["large", "Large"],
-    ].forEach(([value, text]) => {
-      const opt = sizeDrop.createEl("option", { text, attr: { value } });
-      if (this.plugin.settings.cardSize === value) opt.selected = true;
-    });
-    sizeDrop.addEventListener("change", async () => {
-      this.plugin.settings.cardSize = sizeDrop.value;
-      await this.plugin.saveSettings();
-      this.plugin.refreshGalleries();
+    layoutRow("Movies per row", (wrap) => {
+      const drop = wrap.createEl("select", { cls: "movie-gallery-settings-select" });
+      ["auto", "2", "3", "4", "5", "6", "7", "8"].forEach((v) => {
+        const opt = drop.createEl("option", { text: v === "auto" ? "Auto" : v, attr: { value: v } });
+        if (String(this.plugin.settings.cardsPerRow) === v) opt.selected = true;
+      });
+      drop.addEventListener("change", async () => {
+        this.plugin.settings.cardsPerRow = drop.value;
+        await this.plugin.saveSettings();
+        this.plugin.refreshGalleries();
+      });
     });
 
+    layoutRow("Card size", (wrap) => {
+      const drop = wrap.createEl("select", { cls: "movie-gallery-settings-select" });
+      [
+        ["small", "Small"],
+        ["medium", "Medium"],
+        ["large", "Large"],
+      ].forEach(([value, text]) => {
+        const opt = drop.createEl("option", { text, attr: { value } });
+        if (this.plugin.settings.cardSize === value) opt.selected = true;
+      });
+      drop.addEventListener("change", async () => {
+        this.plugin.settings.cardSize = drop.value;
+        await this.plugin.saveSettings();
+        this.plugin.refreshGalleries();
+      });
+    });
+
+    contentEl.createDiv({ cls: "movie-gallery-settings-divider" });
     contentEl.createEl("h3", { text: "Database", cls: "movie-gallery-settings-section-title" });
     contentEl.createEl("p", {
       cls: "movie-gallery-settings-desc",
@@ -3061,9 +3174,9 @@ class TvGallerySettingsModal extends Modal {
 
     fieldLabels.forEach(([key, label]) => {
       const item = fieldsWrap.createEl("label", { cls: "movie-gallery-checkbox-item" });
+      item.createSpan({ cls: "movie-gallery-checkbox-label", text: label });
       const checkbox = item.createEl("input", { type: "checkbox" });
       checkbox.checked = !!this.plugin.settings.tvCardFields[key];
-      item.createSpan({ text: label });
       checkbox.addEventListener("change", async () => {
         this.plugin.settings.tvCardFields[key] = checkbox.checked;
         await this.plugin.saveSettings();
@@ -3071,43 +3184,48 @@ class TvGallerySettingsModal extends Modal {
       });
     });
 
-    contentEl.createEl("h3", { text: "Layout", cls: "movie-gallery-settings-section-title" });
-    const layoutRow = contentEl.createDiv({ cls: "movie-gallery-layout-row" });
+    contentEl.createDiv({ cls: "movie-gallery-settings-divider" });
+    contentEl.createEl("h3", { text: "Gallery Layout", cls: "movie-gallery-settings-section-title" });
+    const layoutWrap = contentEl.createDiv({ cls: "movie-gallery-settings-rows" });
 
-    const layoutField = (parent, label) => {
-      const group = parent.createDiv({ cls: "movie-gallery-layout-field" });
-      group.createDiv({ cls: "movie-add-label", text: label });
-      return group;
+    const layoutRow = (labelText, createControl) => {
+      const row = layoutWrap.createDiv({ cls: "movie-gallery-settings-row" });
+      row.createDiv({ cls: "movie-gallery-settings-row-label", text: labelText });
+      const controlWrap = row.createDiv({ cls: "movie-gallery-settings-row-control" });
+      createControl(controlWrap);
     };
 
-    const rowsGroup = layoutField(layoutRow, "Cards per row");
-    const rowsDrop = rowsGroup.createEl("select");
-    ["auto", "2", "3", "4", "5", "6", "7", "8"].forEach((v) => {
-      const opt = rowsDrop.createEl("option", { text: v === "auto" ? "Auto" : v, attr: { value: v } });
-      if (String(this.plugin.settings.tvCardsPerRow) === v) opt.selected = true;
-    });
-    rowsDrop.addEventListener("change", async () => {
-      this.plugin.settings.tvCardsPerRow = rowsDrop.value;
-      await this.plugin.saveSettings();
-      this.plugin.refreshGalleries();
-    });
-
-    const sizeGroup = layoutField(layoutRow, "Card size");
-    const sizeDrop = sizeGroup.createEl("select");
-    [
-      ["small", "Small"],
-      ["medium", "Medium"],
-      ["large", "Large"],
-    ].forEach(([value, text]) => {
-      const opt = sizeDrop.createEl("option", { text, attr: { value } });
-      if (this.plugin.settings.tvCardSize === value) opt.selected = true;
-    });
-    sizeDrop.addEventListener("change", async () => {
-      this.plugin.settings.tvCardSize = sizeDrop.value;
-      await this.plugin.saveSettings();
-      this.plugin.refreshGalleries();
+    layoutRow("Shows per row", (wrap) => {
+      const drop = wrap.createEl("select", { cls: "movie-gallery-settings-select" });
+      ["auto", "2", "3", "4", "5", "6", "7", "8"].forEach((v) => {
+        const opt = drop.createEl("option", { text: v === "auto" ? "Auto" : v, attr: { value: v } });
+        if (String(this.plugin.settings.tvCardsPerRow) === v) opt.selected = true;
+      });
+      drop.addEventListener("change", async () => {
+        this.plugin.settings.tvCardsPerRow = drop.value;
+        await this.plugin.saveSettings();
+        this.plugin.refreshGalleries();
+      });
     });
 
+    layoutRow("Card size", (wrap) => {
+      const drop = wrap.createEl("select", { cls: "movie-gallery-settings-select" });
+      [
+        ["small", "Small"],
+        ["medium", "Medium"],
+        ["large", "Large"],
+      ].forEach(([value, text]) => {
+        const opt = drop.createEl("option", { text, attr: { value } });
+        if (this.plugin.settings.tvCardSize === value) opt.selected = true;
+      });
+      drop.addEventListener("change", async () => {
+        this.plugin.settings.tvCardSize = drop.value;
+        await this.plugin.saveSettings();
+        this.plugin.refreshGalleries();
+      });
+    });
+
+    contentEl.createDiv({ cls: "movie-gallery-settings-divider" });
     contentEl.createEl("h3", { text: "Database", cls: "movie-gallery-settings-section-title" });
     contentEl.createEl("p", {
       cls: "movie-gallery-settings-desc",
@@ -3226,7 +3344,6 @@ class StatsModal extends Modal {
       return;
     }
 
-    // --- Hero: Total Watch Time gets top billing, full width ---
     const banner = contentEl.createDiv({ cls: "movie-stats-banner movie-stats-banner-hero" });
     banner.createDiv({ cls: "movie-stats-banner-emoji", text: stats.badge.emoji });
     banner.createDiv({ cls: "movie-stats-banner-value", text: this.plugin.formatWatchTime(stats.totalMinutes) });
@@ -3234,7 +3351,6 @@ class StatsModal extends Modal {
     banner.createDiv({ cls: "movie-stats-banner-badge", text: stats.badge.title });
     banner.createDiv({ cls: "movie-stats-banner-quip", text: stats.badge.quip });
 
-    // --- Stat cards: secondary, smaller row below the hero ---
     const cardsCol = contentEl.createDiv({ cls: "movie-stats-cards" });
     const statCard = (value, label) => {
       const card = cardsCol.createDiv({ cls: "movie-stats-card" });
@@ -3247,13 +3363,23 @@ class StatsModal extends Modal {
 
     if (stats.avgMyRating) {
       const ratingCard = contentEl.createDiv({ cls: "movie-stats-rating-card" });
-      ratingCard.createDiv({ cls: "movie-stats-rating-card-star", text: "★" });
-      const ratingText = ratingCard.createDiv({ cls: "movie-stats-rating-card-text" });
+      const ratingTop = ratingCard.createDiv({ cls: "movie-stats-rating-card-top" });
+      ratingTop.createDiv({ cls: "movie-stats-rating-card-star", text: "★" });
+
+      const ratingText = ratingTop.createDiv({ cls: "movie-stats-rating-card-text" });
       ratingText.createDiv({ cls: "movie-stats-rating-card-value", text: `${stats.avgMyRating} / 10` });
       ratingText.createDiv({ cls: "movie-stats-rating-card-label", text: "Average of Your Ratings" });
+
+      const ratedMovies = (await this.plugin.readMovies())
+        .filter((m) => m.myRating !== "" && m.myRating != null)
+        .map((m) => parseFloat(m.myRating));
+      const trendSvg = this.plugin.buildRatingTrendSvg(ratedMovies);
+      if (trendSvg) {
+        const trendWrap = ratingCard.createDiv({ cls: "movie-stats-rating-trend" });
+        trendWrap.innerHTML = trendSvg;
+      }
     }
 
-    // --- Second row: Watched% donut + Genre pie, side by side ---
     const breakdownRow = contentEl.createDiv({ cls: "movie-stats-breakdown-row" });
 
     const makeDonutCol = (title, centerText, centerLabel, conicStops, legendItems) => {
@@ -3294,7 +3420,6 @@ class StatsModal extends Modal {
       this.renderGenrePie(genreCol, stats.topGenres);
     }
 
-    // --- Viewing habits: what you actually watch most, and a way to see which movies those are ---
     if (stats.topYear || stats.topDirector || stats.topCast) {
       contentEl.createEl("h3", { text: "Viewing Habits", cls: "movie-gallery-settings-section-title" });
       contentEl.createEl("p", {
@@ -3334,7 +3459,7 @@ class StatsModal extends Modal {
     const cx = 120;
     const cy = 90;
     const outerR = 40;
-    const ringR = 33; // radius the stroke is centered on
+    const ringR = 33;
     const ringWidth = 13;
     const circumference = 2 * Math.PI * ringR;
 
@@ -3358,7 +3483,6 @@ class StatsModal extends Modal {
       offset += dash;
     });
 
-    // Leader lines + labels, positioned dynamically around the ring based on each slice's angle
     let acc = 0;
     topGenres.forEach(([genre, count], i) => {
       const midPct = (acc + count / 2) / total;
@@ -3442,7 +3566,6 @@ class TvStatsModal extends Modal {
       return;
     }
 
-    // --- Hero: Total Watch Time gets top billing, full width ---
     const banner = contentEl.createDiv({ cls: "movie-stats-banner movie-stats-banner-hero" });
     banner.createDiv({ cls: "movie-stats-banner-emoji", text: stats.badge.emoji });
     banner.createDiv({ cls: "movie-stats-banner-value", text: this.plugin.formatWatchTime(stats.totalMinutes) });
@@ -3450,7 +3573,6 @@ class TvStatsModal extends Modal {
     banner.createDiv({ cls: "movie-stats-banner-badge", text: stats.badge.title });
     banner.createDiv({ cls: "movie-stats-banner-quip", text: stats.badge.quip });
 
-    // --- Stat cards: secondary, smaller row below the hero ---
     const cardsCol = contentEl.createDiv({ cls: "movie-stats-cards" });
     const statCard = (value, label) => {
       const card = cardsCol.createDiv({ cls: "movie-stats-card" });
@@ -3463,13 +3585,23 @@ class TvStatsModal extends Modal {
 
     if (stats.avgMyRating) {
       const ratingCard = contentEl.createDiv({ cls: "movie-stats-rating-card" });
-      ratingCard.createDiv({ cls: "movie-stats-rating-card-star", text: "★" });
-      const ratingText = ratingCard.createDiv({ cls: "movie-stats-rating-card-text" });
+      const ratingTop = ratingCard.createDiv({ cls: "movie-stats-rating-card-top" });
+      ratingTop.createDiv({ cls: "movie-stats-rating-card-star", text: "★" });
+
+      const ratingText = ratingTop.createDiv({ cls: "movie-stats-rating-card-text" });
       ratingText.createDiv({ cls: "movie-stats-rating-card-value", text: `${stats.avgMyRating} / 10` });
       ratingText.createDiv({ cls: "movie-stats-rating-card-label", text: "Average of Your Ratings" });
+
+      const ratedShows = (await this.plugin.readShows())
+        .filter((s) => s.myRating !== "" && s.myRating != null)
+        .map((s) => parseFloat(s.myRating));
+      const trendSvg = this.plugin.buildRatingTrendSvg(ratedShows);
+      if (trendSvg) {
+        const trendWrap = ratingCard.createDiv({ cls: "movie-stats-rating-trend" });
+        trendWrap.innerHTML = trendSvg;
+      }
     }
 
-    // --- Second row: Watched% donut + Genre pie, side by side ---
     const breakdownRow = contentEl.createDiv({ cls: "movie-stats-breakdown-row" });
 
     const makeDonutCol = (title, centerText, centerLabel, conicStops, legendItems) => {
@@ -3510,7 +3642,6 @@ class TvStatsModal extends Modal {
       this.renderGenrePie(genreCol, stats.topGenres);
     }
 
-    // --- Viewing habits ---
     if (stats.topYear || stats.topDirector || stats.topCast) {
       contentEl.createEl("h3", { text: "Viewing Habits", cls: "movie-gallery-settings-section-title" });
       contentEl.createEl("p", {
