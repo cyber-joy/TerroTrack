@@ -1,4 +1,4 @@
-# Movie & TV Gallery — a single-plugin media tracker for Obsidian
+# TerroTrack — a single-plugin media tracker for Obsidian
 
 Everything lives in plain JSON files. Everything else — search, filters, an
 "Add" flow with live TMDB search, a full detail view, editable personal
@@ -9,18 +9,24 @@ them with the tabs at the top of the block.
 
 ## Install
 
-1. In your vault: `.obsidian/plugins/movie-gallery/`
+1. In your vault: `.obsidian/plugins/terrotrack/`
 2. Copy `manifest.json`, `main.js`, `styles.css` into that folder.
-3. Settings → Community plugins → enable "Movie Gallery."
-4. Settings → Movie Gallery → paste your TMDB API key.
-5. In any note:
+3. Settings → Community plugins → enable "TerroTrack."
+4. Settings → TerroTrack → paste your TMDB API key.
+5. In any note, use either code block — both give you the same tabbed
+   view, just starting on a different tab:
    ````
-   ```movie-gallery
+   ```terro-movie
+   ```
+   ````
+   or
+   ````
+   ```terro-tv
    ```
    ````
 
-That one block gives you both **🎬 Movies** and **📺 TV Shows** tabs. Works
-the same way on desktop and mobile.
+Either block gives you both **🎬 Movies** and **📺 TV Shows** tabs — use
+whichever matches the note. Works the same way on desktop and mobile.
 
 ## Using it
 

@@ -90,12 +90,12 @@ class MovieGalleryPlugin extends Plugin {
 
     this.addSettingTab(new MovieGallerySettingTab(this.app, this));
 
-    this.registerMarkdownCodeBlockProcessor("movie-gallery", (source, el) => {
+    this.registerMarkdownCodeBlockProcessor("terro-movie", (source, el) => {
       this.galleryEls.add(el);
       this.renderGallery(el);
     });
 
-    this.registerMarkdownCodeBlockProcessor("tv-gallery", (source, el) => {
+    this.registerMarkdownCodeBlockProcessor("terro-tv", (source, el) => {
       this.galleryEls.add(el);
       if (!this.activeTabByEl) this.activeTabByEl = new Map();
       this.activeTabByEl.set(el, "tv");
@@ -145,8 +145,8 @@ class MovieGalleryPlugin extends Plugin {
       const content = await this.app.vault.adapter.read(path);
       return content.trim() ? JSON.parse(content) : [];
     } catch (e) {
-      console.error("Movie Gallery: failed to read data file", e);
-      new Notice("Movie Gallery: could not read " + path);
+      console.error("TerroTrack: failed to read data file", e);
+      new Notice("TerroTrack: could not read " + path);
       return [];
     }
   }
@@ -221,7 +221,7 @@ class MovieGalleryPlugin extends Plugin {
         trailer_key: trailer ? trailer.key : "",
       };
     } catch (e) {
-      console.error("Movie Gallery: failed to fetch details", e);
+      console.error("TerroTrack: failed to fetch details", e);
       new Notice("Couldn't fetch full details, added with basic info only.");
       return {
         id: fallback.id,
@@ -244,7 +244,7 @@ class MovieGalleryPlugin extends Plugin {
       const res = await requestUrl({ url });
       return (res.json.results || []).slice(0, 8);
     } catch (e) {
-      console.error("Movie Gallery: failed to fetch similar movies", e);
+      console.error("TerroTrack: failed to fetch similar movies", e);
       return [];
     }
   }
@@ -259,8 +259,8 @@ class MovieGalleryPlugin extends Plugin {
       const content = await this.app.vault.adapter.read(path);
       return content.trim() ? JSON.parse(content) : [];
     } catch (e) {
-      console.error("Movie Gallery: failed to read TV data file", e);
-      new Notice("Movie Gallery: could not read " + path);
+      console.error("TerroTrack: failed to read TV data file", e);
+      new Notice("TerroTrack: could not read " + path);
       return [];
     }
   }
@@ -339,7 +339,7 @@ class MovieGalleryPlugin extends Plugin {
         trailer_key: trailer ? trailer.key : "",
       };
     } catch (e) {
-      console.error("Movie Gallery: failed to fetch TV show details", e);
+      console.error("TerroTrack: failed to fetch TV show details", e);
       new Notice("Couldn't fetch full details, added with basic info only.");
       return {
         id: fallback.id,
@@ -363,7 +363,7 @@ class MovieGalleryPlugin extends Plugin {
       const res = await requestUrl({ url });
       return (res.json.results || []).slice(0, 8);
     } catch (e) {
-      console.error("Movie Gallery: failed to fetch similar shows", e);
+      console.error("TerroTrack: failed to fetch similar shows", e);
       return [];
     }
   }
@@ -386,7 +386,7 @@ class MovieGalleryPlugin extends Plugin {
         shows[i] = fresh;
         updated++;
       } catch (e) {
-        console.error("Movie Gallery: failed to refresh", s.name, e);
+        console.error("TerroTrack: failed to refresh", s.name, e);
       }
 
       if (onProgress) onProgress(i + 1, total);
@@ -406,7 +406,13 @@ class MovieGalleryPlugin extends Plugin {
       "overview", "notes", "trailer_key",
     ];
     const esc = (v) => {
-      const s = String(v ?? "");
+      let s = String(v ?? "");
+      // Prevent CSV/formula injection: a leading =, +, -, or @ is interpreted
+      // as a formula by Excel/Sheets when the file is opened, which can be
+      // abused for data exfiltration or code execution via crafted titles,
+      // cast lists, or notes. Prefixing with a tab neutralizes it while
+      // keeping the value readable.
+      if (/^[=+\-@]/.test(s)) s = "\t" + s;
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
     const lines = [fields.join(",")];
@@ -443,7 +449,7 @@ class MovieGalleryPlugin extends Plugin {
         fs.writeFileSync(result, content, "utf-8");
         return result;
       } catch (e) {
-        console.error("Movie Gallery: native save dialog failed, saving to vault root instead", e);
+        console.error("TerroTrack: native save dialog failed, saving to vault root instead", e);
         new Notice("Couldn't open the save dialog — saved to vault root instead.");
       }
     }
@@ -492,7 +498,7 @@ class MovieGalleryPlugin extends Plugin {
       });
       return Object.assign(details, { myRating: overlay.myRating || "", watched: !!overlay.watched });
     } catch (e) {
-      console.error("Movie Gallery: TV import search failed for", name, e);
+      console.error("TerroTrack: TV import search failed for", name, e);
       return this.buildBareShow(name, year, overlay);
     }
   }
@@ -513,7 +519,7 @@ class MovieGalleryPlugin extends Plugin {
         }
       }
     } catch (e) {
-      console.error("Movie Gallery: IMDb id lookup failed for", name, e);
+      console.error("TerroTrack: IMDb id lookup failed for", name, e);
     }
     return this.resolveShowViaSearch(name, year, overlay);
   }
@@ -668,7 +674,7 @@ class MovieGalleryPlugin extends Plugin {
         movies[i] = fresh;
         updated++;
       } catch (e) {
-        console.error("Movie Gallery: failed to refresh", m.title, e);
+        console.error("TerroTrack: failed to refresh", m.title, e);
       }
 
       if (onProgress) onProgress(i + 1, total);
@@ -687,7 +693,8 @@ class MovieGalleryPlugin extends Plugin {
       "cast", "overview", "notes", "trailer_key",
     ];
     const esc = (v) => {
-      const s = String(v ?? "");
+      let s = String(v ?? "");
+      if (/^[=+\-@]/.test(s)) s = "\t" + s;
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
     const lines = [fields.join(",")];
@@ -732,7 +739,7 @@ class MovieGalleryPlugin extends Plugin {
         fs.writeFileSync(result, content, "utf-8");
         return result;
       } catch (e) {
-        console.error("Movie Gallery: native save dialog failed, saving to vault root instead", e);
+        console.error("TerroTrack: native save dialog failed, saving to vault root instead", e);
         new Notice("Couldn't open the save dialog — saved to vault root instead.");
       }
     }
@@ -1043,8 +1050,11 @@ class MovieGalleryPlugin extends Plugin {
     const header = parseLine(lines[0]);
     return lines.slice(1).filter(Boolean).map((line) => {
       const values = parseLine(line);
-      const row = {};
-      header.forEach((h, i) => (row[h] = values[i] ?? ""));
+      const row = Object.create(null);
+      header.forEach((h, i) => {
+        if (h === "__proto__" || h === "constructor" || h === "prototype") return;
+        row[h] = values[i] ?? "";
+      });
       return row;
     });
   }
@@ -1099,7 +1109,7 @@ class MovieGalleryPlugin extends Plugin {
       });
       return Object.assign(details, { myRating: overlay.myRating || "", watched: !!overlay.watched });
     } catch (e) {
-      console.error("Movie Gallery: import search failed for", title, e);
+      console.error("TerroTrack: import search failed for", title, e);
       return this.buildBareMovie(title, year, overlay);
     }
   }
@@ -1120,7 +1130,7 @@ class MovieGalleryPlugin extends Plugin {
         }
       }
     } catch (e) {
-      console.error("Movie Gallery: IMDb id lookup failed for", title, e);
+      console.error("TerroTrack: IMDb id lookup failed for", title, e);
     }
     return this.resolveViaSearch(title, year, overlay);
   }
@@ -2012,7 +2022,7 @@ class AddMovieModal extends Modal {
       input.focus();
     } else {
       contentEl.createEl("p", {
-        text: "Set your TMDB API key in Settings → Movie Gallery to search TMDB, or fill in the form below manually.",
+        text: "Set your TMDB API key in Settings → TerroTrack to search TMDB, or fill in the form below manually.",
         cls: "movie-gallery-warning",
       });
     }
@@ -2217,7 +2227,7 @@ class AddShowModal extends Modal {
       input.focus();
     } else {
       contentEl.createEl("p", {
-        text: "Set your TMDB API key in Settings → Movie Gallery to search TMDB, or fill in the form below manually.",
+        text: "Set your TMDB API key in Settings → TerroTrack to search TMDB, or fill in the form below manually.",
         cls: "movie-gallery-warning",
       });
     }
@@ -2486,7 +2496,7 @@ class MovieDetailModal extends Modal {
     if (m.trailer_key) {
       const trailerBtn = actions.createEl("button", { text: "▶ Watch Trailer", cls: "movie-detail-trailer-btn" });
       trailerBtn.addEventListener("click", () => {
-        window.open(`https://www.youtube.com/watch?v=${m.trailer_key}`, "_blank");
+        window.open(`https://www.youtube.com/watch?v=${m.trailer_key}`, "_blank", "noopener,noreferrer");
       });
     }
     const editBtn = actions.createEl("button", { text: "✎ Edit", cls: "movie-detail-edit-btn" });
@@ -2621,8 +2631,11 @@ class MovieDetailModal extends Modal {
       placeholder: "https://www.youtube.com/watch?v=...",
       getValue: () => (m.trailer_key ? `https://www.youtube.com/watch?v=${m.trailer_key}` : ""),
       onInput: (v) => {
-        const match = v.match(/(?:v=|youtu\.be\/)([\w-]{6,})/);
-        m.trailer_key = match ? match[1] : v.trim();
+        const trimmed = v.trim();
+        const match = trimmed.match(/(?:v=|youtu\.be\/)([\w-]{6,})/);
+        if (match) m.trailer_key = match[1];
+        else if (/^[\w-]{6,}$/.test(trimmed)) m.trailer_key = trimmed;
+        else m.trailer_key = "";
       },
     });
 
@@ -2786,7 +2799,7 @@ class TvDetailModal extends Modal {
     if (s.trailer_key) {
       const trailerBtn = actions.createEl("button", { text: "▶ Watch Trailer", cls: "movie-detail-trailer-btn" });
       trailerBtn.addEventListener("click", () => {
-        window.open(`https://www.youtube.com/watch?v=${s.trailer_key}`, "_blank");
+        window.open(`https://www.youtube.com/watch?v=${s.trailer_key}`, "_blank", "noopener,noreferrer");
       });
     }
     const editBtn = actions.createEl("button", { text: "✎ Edit", cls: "movie-detail-edit-btn" });
@@ -2938,8 +2951,11 @@ class TvDetailModal extends Modal {
       placeholder: "https://www.youtube.com/watch?v=...",
       getValue: () => (s.trailer_key ? `https://www.youtube.com/watch?v=${s.trailer_key}` : ""),
       onInput: (v) => {
-        const match = v.match(/(?:v=|youtu\.be\/)([\w-]{6,})/);
-        s.trailer_key = match ? match[1] : v.trim();
+        const trimmed = v.trim();
+        const match = trimmed.match(/(?:v=|youtu\.be\/)([\w-]{6,})/);
+        if (match) s.trailer_key = match[1];
+        else if (/^[\w-]{6,}$/.test(trimmed)) s.trailer_key = trimmed;
+        else s.trailer_key = "";
       },
     });
 
@@ -3766,7 +3782,7 @@ class MovieGallerySettingTab extends PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "Movie Gallery Settings" });
+    containerEl.createEl("h2", { text: "TerroTrack Settings" });
 
     new Setting(containerEl)
       .setName("TMDB API key")
