@@ -67,7 +67,7 @@ YourVault/
 - Enable it.
 
 <p>
-    <img src="Attachments/plugin_installation.png"width="600"/>
+    <img src="Attachments/plugin_installation.png" width="600"/>
 </p>
 
 ---
@@ -81,7 +81,7 @@ YourVault/
 
 If you don't have one, see [How to get your free TMDB API key](#How-to-get-your-free-TMDB-API-key) below.
 
-### 2. View your Library.
+### 2. View your Library
 
 In any note, add one of these code blocks:
 
@@ -193,11 +193,6 @@ Because the files are plain JSON, you can manually edit them whenever necessary 
 The key is stored in the plugin's `data.json` and stays on your machine.
 
 Without it, the plugin still works — manual entry, gallery, filters, sorting, notes, ratings, backups, and native-backup imports all function. You lose TMDB search, Discover, metadata updates, and IMDb/Letterboxd enrichment.
-## 🔑 TMDB API
-
-TerroTrack uses **The Movie Database (TMDB)** to retrieve movie and TV metadata.
-
-You need your own TMDB API key to use TMDB-powered features.
 
 ---
 
