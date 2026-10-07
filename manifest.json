@@ -1,10 +1,10 @@
 {
   "id": "terrotrack",
   "name": "TerroTrack",
-  "version": "1.1.0",
+  "version": "1.0.0",
   "minAppVersion": "0.15.0",
-  "description": "A single-plugin Movie & TV tracker for Obsidian with TMDB search, rich detail views, filters, stats, and backup/import. No other plugins required.",
-  "author": "Ashiquzzaman-Joy",
-  "authorUrl": "https://github.com/Ashiquzzaman-Joy",
+  "description": "Track your Movies & TV shows.",
+  "author": "cyber-joy",
+  "authorUrl": "https://github.com/cyber-joy",
   "isDesktopOnly": false
 }
