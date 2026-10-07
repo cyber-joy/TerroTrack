@@ -4,7 +4,7 @@ An [Obsidian](https://obsidian.md) plugin for tracking **Movies & TV Shows**. Di
 
 |                         |                   |
 | - - - - - - - - - - - - | - - - - - - - - - |
-| ![](C:\Users\Joy\Downloads\2026-10-05_12-00.png) | ![](C:\Users\Joy\Downloads\2026-10-05_14-24.png) |
+| ![](Attachments/movie_library.png) | ![](Attachments/tv_library.png) |
 
 ## ✨ Features
 
