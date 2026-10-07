@@ -7,21 +7,39 @@ An [Obsidian](https://obsidian.md) plugin for tracking **Movies & TV Shows**. Di
 
 ## ✨ Features
 
-* 🎬 Movie & 📺 TV show libraries
-* 🔎 TMDB search and metadata
-* 🖼️ Poster-based gallery
-* 🔍 Search by title, director/creator, or cast
-* 🎛️ Status, genre, year, language, rating, and personal rating filters
-* ↕️ Multiple sorting options
-* ⭐ Personal ratings
-* 📝 Personal notes
-* 🎞️ Similar movies/shows from TMDB
-* 📊 Statistics and viewing habits
-* ⚙️ Customizable gallery cards
-* 💾 CSV and TXT backups
-* 📥 Import from TMDB, IMDb, and Letterboxd
-* 📱 Desktop and mobile support
-* 📄 Plain JSON data storage
+**Libraries**
+- 🎬 Movie & 📺 TV show libraries, each with its own card fields, filters, and stats
+- 🖼️ Poster-based gallery with adjustable card size and column count
+- 🎛️ Four-way status: **To Watch · Watching · Watched · Trashed**
+- ❤️ Favourites — one-tap heart on posters, plus a favourites-only toolbar filter
+- ⭐ Personal star ratings, 5 stars at half-star precision
+- 📝 Personal notes with a preview card and a full reading/editing layer
+- 📺 TV progress tracks seasons and episodes together, with a per-day logging date
+
+**Discover** *(requires a TMDB API key)*
+- ✨ Picked for you — recommendations built from your own ratings, genres, and watch history
+- 🔥 Trending this week
+- 🆕 In theaters now / On the air
+- 📅 Coming soon — upcoming releases and new series
+
+**Search, filter, sort**
+- 🔍 Search by title, director/creator, and cast
+- 🏷️ Filter by genre, year, language, TMDB rating, and your own rating (+ series status on TV)
+- 📆 Dual-handle year picker with Range and Individual modes
+- ↕️ Sort by Recently added, Title, Year, Rating, or Runtime, ascending or descending
+
+**Stats**
+- ⏱️ Total watch time with a playful tier badge
+- 🍩 Watched / Watching / To Watch / Trashed breakdown as a donut
+- 🥧 Genre distribution as a labelled pie
+- 🎯 Viewing habits — favourite year, top director/creator, most-seen actor — click to jump to those titles
+- 🗓️ GitHub-style activity heatmap with Week / Month / Year / All-time views, a Movies/TV/All filter, and current/longest streak tiles
+
+**Data**
+- 📄 Plain JSON storage — inspect, edit, or move it outside Obsidian
+- 💾 CSV backups (full round-trip) and TXT exports
+- 📥 Import from TerroTrack backups, IMDb, and Letterboxd (movies only)
+- 🔄 Update database — re-fetch TMDB metadata while keeping your status, notes, ratings, and progress
 
 ---
 
@@ -49,7 +67,7 @@ YourVault/
 - Enable it.
 
 <p>
-    <img src="Attachments/plugin_installation.png"width="600"/>
+    <img src="Attachments/plugin_installation.png" width="600"/>
 </p>
 
 ---
@@ -63,7 +81,7 @@ YourVault/
 
 If you don't have one, see [How to get your free TMDB API key](#How-to-get-your-free-TMDB-API-key) below.
 
-### 2. View your Library.
+### 2. View your Library
 
 In any note, add one of these code blocks:
 
@@ -175,11 +193,6 @@ Because the files are plain JSON, you can manually edit them whenever necessary 
 The key is stored in the plugin's `data.json` and stays on your machine.
 
 Without it, the plugin still works — manual entry, gallery, filters, sorting, notes, ratings, backups, and native-backup imports all function. You lose TMDB search, Discover, metadata updates, and IMDb/Letterboxd enrichment.
-## 🔑 TMDB API
-
-TerroTrack uses **The Movie Database (TMDB)** to retrieve movie and TV metadata.
-
-You need your own TMDB API key to use TMDB-powered features.
 
 ---
 
