@@ -50,7 +50,7 @@ YourVault/
 - Enable it.
 
 <p>
-    <img src="C:\Users\Joy\Downloads\2026-10-05_15-57.png"width="600"/>
+    <img src="Attachments/plugin_installation.png"width="600"/>
 </p>
 
 ---
