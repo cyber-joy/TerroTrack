@@ -1,10 +1,13 @@
 # TerroTrack
 
 An [Obsidian](https://obsidian.md) plugin for tracking **Movies & TV Shows**. Discover trending titles and add them to your collection directly from the plugin. Your data is stored as plain JSON and can be exported as CSV.
+<<<<<<< HEAD
 
 |                         |                   |
 | - - - - - - - - - - - - | - - - - - - - - - |
 | ![](C:\Users\Joy\Downloads\2026-10-05_12-00.png) | ![](C:\Users\Joy\Downloads\2026-10-05_14-24.png) |
+=======
+>>>>>>> 6cdc73f039a6f55040561e24b6687574423fb161
 
 ## ✨ Features
 
@@ -31,6 +34,7 @@ An [Obsidian](https://obsidian.md) plugin for tracking **Movies & TV Shows**. Di
 ### Manual Installation
 
 > Make sure to turn off restricted mode.
+<<<<<<< HEAD
 #### 1. Download
 - Download **TerroTrack** from the [latest release](https://github.com/cyber-joy/TerroTrack/releases).
 - Extract the ZIP file.
@@ -52,6 +56,38 @@ YourVault/
 <p>
     <img src="C:\Users\Joy\Downloads\2026-10-05_15-57.png"width="600"/>
 </p>
+=======
+
+1. Download TerroTrack from the latest release.
+2. Open Settings → Community plugins → Installed plugins folder.
+3. Put the TerroTrack folder into it.
+4. Open **Settings → Community plugins**.
+5. Enable **TerroTrack**.
+
+## Quick start
+1. Add your TMDB API key.
+Settings → TerroTrack → TMDB API key. See Getting a TMDB API key below — it's free.
+
+2. Add a gallery to any note.
+````
+```terro-movie
+```
+````
+or
+````
+```terro-tv
+```
+````
+Both blocks render the same interface — a Movies / TV Shows / Discover tab bar. The only difference is which tab opens first.
+
+3. Add your first title.
+Click:
+
+* **+ Add Movie**
+* **+ Add Show**
+
+You can search TMDB and select a result, or skip the search and use the **OR ENTER MANUALLY** form for titles that aren't available on TMDB.
+>>>>>>> 6cdc73f039a6f55040561e24b6687574423fb161
 
 ---
 
