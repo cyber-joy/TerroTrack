@@ -2,9 +2,8 @@
 
 An [Obsidian](https://obsidian.md) plugin for tracking **Movies & TV Shows**. Discover trending titles and add them to your collection directly from the plugin. Your data is stored as plain JSON and can be exported as CSV.
 
-|                         |                   |
-| - - - - - - - - - - - - | - - - - - - - - - |
-| ![](Attachments/movie_library.png) | ![](Attachments/tv_library.png) |
+![](Attachments/movie_library.png)
+![](Attachments/tv_library.png)
 
 ## ✨ Features
 
