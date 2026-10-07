@@ -1,6 +1,10 @@
 # TerroTrack
 
-A personal media tracker plugin for [Obsidian](https://obsidian.md) for tracking **Movies & TV Shows**.
+An [Obsidian](https://obsidian.md) plugin for tracking **Movies & TV Shows**. Discover trending titles and add them to your collection directly from the plugin. Your data is stored as plain JSON and can be exported as CSV.
+
+|                         |                   |
+| - - - - - - - - - - - - | - - - - - - - - - |
+| ![](C:\Users\Joy\Downloads\2026-10-05_12-00.png) | ![](C:\Users\Joy\Downloads\2026-10-05_14-24.png) |
 
 ## ✨ Features
 
@@ -26,275 +30,62 @@ A personal media tracker plugin for [Obsidian](https://obsidian.md) for tracking
 
 ### Manual Installation
 
-1. Open your Obsidian vault.
-2. Navigate to:
-
-   ```
-   .obsidian/plugins/terrotrack/
-   ```
-3. Copy these files into the folder:
-
-   ```
-   manifest.json
-   main.js
-   styles.css
-   ```
-4. Open **Settings → Community plugins**.
-5. Enable **TerroTrack**.
-6. Go to **Settings → TerroTrack** and enter your **TMDB API key**.
-
-### Adding the Library
-
-Create a code block in any note:
-
-````markdown
-```terro-movie
+> Make sure to turn off restricted mode.
+#### 1. Download
+- Download **TerroTrack** from the [latest release](https://github.com/cyber-joy/TerroTrack/releases).
+- Extract the ZIP file.
+#### 2. location
+- Open your Obsidian vault's plugin folder.
+- Copy the entire plugin folder into it.
+      
 ```
-````
-
-or:
-
-````markdown
-```terro-tv
+YourVault/
+└── .obsidian/
+    └── plugins/
 ```
-````
 
-Both blocks provide the same interface with **🎬 Movies** and **📺 TV Shows** tabs. The only difference is which tab is selected initially.
+#### 3. Enable the Plugin
+- Open Obsidian **Settings** → **Community plugins**
+- Find **TerroTrack** in the installed plugins list.
+- Enable it.
 
-The plugin works on both **desktop and mobile**.
+<p>
+    <img src="C:\Users\Joy\Downloads\2026-10-05_15-57.png"width="600"/>
+</p>
 
 ---
 
-# 🎬 Movies & 📺 TV Shows
+## Quick start
 
-## Adding Movies & Shows
+### 1. Add your TMDB API key
 
+- Go to **Settings → TerroTrack → TMDB API key**.
+- Paste your key.
+
+If you don't have one, see [How to get your free TMDB API key](#How-to-get-your-free-TMDB-API-key) below.
+
+### 2. View your Library.
+
+In any note, add one of these code blocks:
+
+````
+```terro-movie
+```
+````
+or
+````
+```terro-tv
+```
+````
+Both render the same interface — a **Movies / TV Shows** tab bar. The only difference is which tab opens first.
+
+### 3. Add your first title.
 Click:
 
 * **+ Add Movie**
 * **+ Add Show**
 
 You can search TMDB and select a result, or skip the search and use the **OR ENTER MANUALLY** form for titles that aren't available on TMDB.
-
----
-
-## 🖼️ Gallery
-
-The gallery provides a poster-based view of your library.
-
-### Search
-
-Search by:
-
-* Title
-* Director / Creator
-* Cast
-
-### Filters
-
-The main toolbar provides:
-
-* Status
-* Genre
-
-The **funnel icon** expands additional filters:
-
-* Year
-* Language
-* TMDB Rating
-* My Rating
-
-### Sorting
-
-Sort your library using the available sorting options.
-
-### Gallery Controls
-
-* ⚙️ **Gallery Settings**
-* 📊 **Stats**
-
-Movies and TV Shows maintain their own gallery settings and statistics.
-
----
-
-# 📖 Detail View
-
-Click any poster to open its detail view.
-
-### Quick Editing
-
-You can change:
-
-* **Status** — click the status directly
-* **My Rating** — use the rating dropdown
-
-There is no need to open the Edit screen for these fields.
-
-### Edit
-
-The Edit screen provides access to the remaining metadata and personal information.
-
-### TV Show Information
-
-TV shows have additional fields:
-
-* First Air Date
-* Episode Runtime
-* Seasons
-* Episodes
-* Creator
-* TMDB Series Status
-
-The series status can be:
-
-* Ended
-* Returning
-
-### Similar Titles
-
-The detail view can display similar movies or shows using TMDB recommendations.
-
-A recommended title can be added to your library with one tap.
-
----
-
-# ⚙️ Gallery Settings
-
-Gallery Settings lets you customize how your library is displayed.
-
-### Card Fields
-
-Choose which fields appear on each gallery card.
-
-### Column Layout
-
-Choose between:
-
-* Fixed column count
-* Automatic sizing
-
-### Update Database
-
-**Update Database** re-fetches TMDB information for every item in your library.
-
-Your personal data is preserved, including:
-
-* Watched status
-* Notes
-* Personal ratings
-
-Each item requires one TMDB request.
-
----
-
-# 💾 Backup
-
-TerroTrack supports two backup formats.
-
-### CSV
-
-Exports every available field and can be fully restored through the import system.
-
-### TXT
-
-Exports a simple numbered list containing:
-
-```text
-1. Dune (2021)
-2. Interstellar (2014)
-3. The Dark Knight (2008)
-```
-
-### Desktop
-
-The operating system's save dialog lets you choose exactly where the backup is saved.
-
-### Mobile
-
-Backups are saved to the vault root.
-
----
-
-# 📥 Import
-
-TerroTrack automatically detects supported import formats.
-
-## Movies
-
-Supported formats:
-
-* TerroTrack CSV backups
-* Letterboxd `watched.csv`
-* Letterboxd `ratings.csv`
-* Letterboxd `diary.csv`
-* Letterboxd `watchlist.csv`
-* IMDb ratings exports
-* IMDb watchlist exports
-
-## TV Shows
-
-Supported formats:
-
-* TerroTrack CSV backups
-* IMDb exports
-
-IMDb exports can contain both movies and TV shows.
-
-The **Title Type** column is used to determine which entries belong to Movies or TV Shows.
-
-Therefore, the same IMDb export can be imported into both libraries:
-
-1. Import it into **Movies** → movie entries are added.
-2. Import the same file into **TV Shows** → TV entries are added.
-
-Entries belonging to the other library are skipped automatically.
-
-### IMDb Matching
-
-IMDb imports use the exact IMDb ID whenever possible.
-
-If an exact ID match isn't available, TerroTrack falls back to a **title + year search**.
-
-### TMDB API Key
-
-IMDb and Letterboxd exports don't contain poster information, so a **TMDB API key is required** to retrieve the corresponding TMDB data.
-
-> Letterboxd does not track TV shows, so Letterboxd imports are available for Movies only.
-
----
-
-# 📊 Statistics
-
-The Stats view provides information about your library and viewing habits.
-
-### Library Statistics
-
-* Total titles
-* Watched titles
-* To-watch titles
-* Total watch time
-
-### Watch Time
-
-The total watch time is displayed with a playful tier badge based on your accumulated viewing time.
-
-### Watched Percentage
-
-A donut chart displays your watched percentage.
-
-### Genre Breakdown
-
-A pie chart shows the distribution of genres, with dynamic leader lines for readability.
-
-### Viewing Habits
-
-The Viewing Habits section includes:
-
-* Favorite year
-* Top director / creator
-* Most-seen actor
-
-Clicking a habit tile takes you directly to the corresponding titles in the gallery.
 
 ---
 
@@ -375,6 +166,16 @@ Because the files are plain JSON, you can manually edit them whenever necessary 
 
 ---
 
+## How to get your free TMDB API key
+1. Create a free account at [themoviedb.org](https://www.themoviedb.org).
+2. Go to **Settings → [API](https://www.themoviedb.org/settings/api)**.
+3. Request an API key and choose the **Developer** option.
+4. Copy the **API Key (v3 auth)** — a 32-character hex string.
+5. Paste it into **Settings → TerroTrack → TMDB API key**.
+
+The key is stored in the plugin's `data.json` and stays on your machine.
+
+Without it, the plugin still works — manual entry, gallery, filters, sorting, notes, ratings, backups, and native-backup imports all function. You lose TMDB search, Discover, metadata updates, and IMDb/Letterboxd enrichment.
 ## 🔑 TMDB API
 
 TerroTrack uses **The Movie Database (TMDB)** to retrieve movie and TV metadata.
