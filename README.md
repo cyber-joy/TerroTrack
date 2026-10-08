@@ -43,6 +43,14 @@ An [Obsidian](https://obsidian.md) plugin for tracking **Movies & TV Shows**. Di
 
 ---
 
+## 📖 Usage
+
+![](Attachments/demo.gif)
+
+**Add a title → Rate it → Track seasons & episodes → Add personal notes → Edit details → Update information → Watch trailer**
+
+---
+
 ## 📦 Installation
 
 ### Manual Installation
@@ -106,26 +114,22 @@ You can search TMDB and select a result, or skip the search and use the **OR ENT
 
 ---
 
-# 💾 Data Storage
+## 💾 Data storage
 
-TerroTrack stores your library as plain JSON files.
+By default, TerroTrack writes three files to your vault root:
 
-By default:
+| File            | Contents                                 |
+| --------------- | ---------------------------------------- |
+| `movies.json`   | Your movie library                       |
+| `tvshows.json`  | Your TV library                          |
+| `activity.json` | Daily activity counts behind the heatmap |
 
-```text
-movies.json
-tvshows.json
-```
+All three paths can be changed in **Settings → TerroTrack**.
 
-Both filenames can be changed in the plugin settings.
+Everything is plain JSON — you can open, edit, or move it outside Obsidian.
 
-The data is stored as regular text, making it easy to inspect, edit, back up, or move outside Obsidian.
-
----
-
-## 🎬 Movie Data
-
-Example:
+<details>
+<summary><strong>Movie entry example</strong></summary>
 
 ```json
 {
@@ -136,6 +140,8 @@ Example:
   "rating": "8.2",
   "myRating": "9",
   "watched": true,
+  "watchedDate": "2026-02-14",
+  "favorite": true,
   "release_date": "2021-10-22",
   "runtime": 155,
   "original_language": "en",
@@ -149,11 +155,10 @@ Example:
 }
 ```
 
----
+</details>
 
-## 📺 TV Show Data
-
-Example:
+<details>
+<summary><strong>TV entry example</strong></summary>
 
 ```json
 {
@@ -165,6 +170,8 @@ Example:
   "myRating": "10",
   "watched": true,
   "first_air_date": "2008-01-20",
+  "last_air_date": "2013-09-29",
+  "show_status": "Ended",
   "episode_runtime": 47,
   "original_language": "en",
   "genres": "Drama, Crime",
@@ -175,11 +182,13 @@ Example:
   "trailer_key": "",
   "number_of_seasons": 5,
   "number_of_episodes": 62,
-  "show_status": "Ended"
+  "season_episodes": [7, 13, 13, 13, 16],
+  "seasonsWatched": 2,
+  "episodesWatched": 20
 }
 ```
 
-Because the files are plain JSON, you can manually edit them whenever necessary or process them using external tools.
+</details>
 
 ---
 
