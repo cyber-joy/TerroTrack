@@ -204,6 +204,18 @@ Everything is plain JSON — you can open, edit, or move it outside Obsidian.
 
 ---
 
+## 💾 Backup & Import
+
+TerroTrack supports library backup and import through **Gallery Settings → Data**.
+
+- **CSV** — Full library backup that can be re-imported.
+- **TXT** — Simple numbered list of your library.
+- **TerroTrack** — Import previous CSV backups.
+- **IMDb** — Import movie and TV exports.
+- **Letterboxd** — Import movie exports, including ratings and watchlists.
+
+---
+
 ## 🔄 Updating
 
 Download the latest release and replace the existing `TerroTrack` plugin folder with the new version.
