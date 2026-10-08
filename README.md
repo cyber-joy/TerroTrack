@@ -49,7 +49,7 @@ An [Obsidian](https://obsidian.md) plugin for tracking **Movies & TV Shows**. Di
 
 **Add a title → Rate it → Track seasons & episodes → Add personal notes → Edit details → Update information → Watch trailer**
 
-![](Attachments/demo.gif)
+![](Attachments/demo-1.gif)
 
 ### Searching Your Library
 
@@ -62,14 +62,55 @@ Search your collection by title, director (creator, for TV), and cast.
 
 ## 📸 Screenshots
 
-| Library | Details |
-| --- | --- |
-| ![Library]() | ![Details]() |
+<details>
+<summary><strong>Similar Titles</strong></summary>
+<br>
 
-| TV Tracking |
-| --- |
-| ![TV Tracking]() |
+<p align="center">
+  <img src="Attachments/similar_titles.png" width="48%" />
+</p>
 
+</details>
+
+<details>
+<summary><strong>⚙️ Gallery settings</strong></summary>
+<br>
+
+<p align="center">
+  <img src="Attachments/gallery_settings.png" width="48%" />
+  <img src="Attachments/import%26export.png" width="48%" />
+</p>
+
+</details>
+
+<details>
+<summary><strong>🎛️ Filters</strong></summary>
+<br>
+
+<p align="center">
+  <img src="Attachments/filter-1.png" width="48%" />
+  <img src="Attachments/filter-2.png" width="48%" />
+  <img src="Attachments/filter-3.png" width="48%" />
+  <img src="Attachments/filter-4.png" width="48%" />    
+</p>
+
+</details>
+
+<details>
+<summary><strong>📊 Library Stats</strong></summary>
+<br>
+
+<p align="center">
+  <img src="Attachments/library_stats.png" width="48%" align="left" />
+  <img src="Attachments/heatmap-1.png" width="48%" />
+  <br>
+  <img src="Attachments/heatmap-2.png" width="48%" />
+  <br>    
+  <img src="Attachments/heatmap-3.png" width="48%" />
+</p>
+
+
+</details>
 
 ---
 
