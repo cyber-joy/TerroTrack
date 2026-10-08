@@ -5,6 +5,8 @@ An [Obsidian](https://obsidian.md) plugin for tracking **Movies & TV Shows**. Di
 ![](Attachments/movie_library.png)
 ![](Attachments/tv_library.png)
 
+---
+
 ## Quick Navigation
 
 <p align="center">
@@ -19,6 +21,8 @@ An [Obsidian](https://obsidian.md) plugin for tracking **Movies & TV Shows**. Di
   <a href="#-compatibility"><strong>📱 Compatibility</strong></a> ·
   <a href="#-license"><strong>📄 License</strong></a>
 </p>
+
+---
 
 ## ✨ Features
 
