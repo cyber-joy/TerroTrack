@@ -60,6 +60,19 @@ Search your collection by title, director (creator, for TV), and cast.
 
 ---
 
+## 📸 Screenshots
+
+| Library | Details |
+| --- | --- |
+| ![Library]() | ![Details]() |
+
+| TV Tracking |
+| --- |
+| ![TV Tracking]() |
+
+
+---
+
 ## 📦 Installation
 
 ### Manual Installation
