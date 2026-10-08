@@ -7,16 +7,18 @@ An [Obsidian](https://obsidian.md) plugin for tracking **Movies & TV Shows**. Di
 
 ## Quick Navigation
 
-**[✨ Features](#-features)** ·
-**[📖 Usage](#-usage)** ·
-**[📸 Screenshots](#-screenshots)** ·
-**[📦 Installation](#-installation)** ·
-**[🚀 Quick Start](#quick-start)** ·
-**[💾 Data storage](#-data-storage)** ·
-**[💾 Backup & Import](#-backup--import)** ·
-**[🔄 Updating](#-updating)** ·
-**[📱 Compatibility](#-compatibility)** ·
-**[📄 License](#-license)** 
+<p align="center">
+  <a href="#-features"><strong>✨ Features</strong></a> ·
+  <a href="#-usage"><strong>📖 Usage</strong></a> ·
+  <a href="#-screenshots"><strong>📸 Screenshots</strong></a> ·
+  <a href="#-installation"><strong>📦 Installation</strong></a> ·
+  <a href="#-quick-start"><strong>🚀 Quick Start</strong></a> ·
+  <a href="#-data-storage"><strong>💾 Data Storage</strong></a> ·
+  <a href="#-backup%26import"><strong>💾 Backup & Import</strong></a> ·
+  <a href="#-updating"><strong>🔄 Updating</strong></a> ·
+  <a href="#-compatibility"><strong>📱 Compatibility</strong></a> ·
+  <a href="#-license"><strong>📄 License</strong></a>
+</p>
 
 ## ✨ Features
 
