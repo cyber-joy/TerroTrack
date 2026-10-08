@@ -43,6 +43,14 @@ An [Obsidian](https://obsidian.md) plugin for tracking **Movies & TV Shows**. Di
 
 ---
 
+## 📖 Usage
+
+![](Attachments/demo.gif)
+
+**Add a title → Rate it → Track seasons & episodes → Add personal notes → Edit details → Update information → Watch trailer**
+
+---
+
 ## 📦 Installation
 
 ### Manual Installation
