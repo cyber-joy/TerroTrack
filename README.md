@@ -12,7 +12,11 @@ An [Obsidian](https://obsidian.md) plugin for tracking **Movies & TV Shows**. Di
 **[📸 Screenshots](#-screenshots)** ·
 **[📦 Installation](#-installation)** ·
 **[🚀 Quick Start](#quick-start)** ·
+**[💾 Data storage](#-data-storage)** ·
 **[💾 Backup & Import](#-backup--import)** ·
+**[🔄 Updating](#-updating)** ·
+**[📱 Compatibility](#-compatibility)** ·
+**[📄 License](#-license)** ·
 
 ## ✨ Features
 
