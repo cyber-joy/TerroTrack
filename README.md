@@ -16,7 +16,7 @@ An [Obsidian](https://obsidian.md) plugin for tracking **Movies & TV Shows**. Di
 **[💾 Backup & Import](#-backup--import)** ·
 **[🔄 Updating](#-updating)** ·
 **[📱 Compatibility](#-compatibility)** ·
-**[📄 License](#-license)** ·
+**[📄 License](#-license)** 
 
 ## ✨ Features
 
