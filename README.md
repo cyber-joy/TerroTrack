@@ -45,9 +45,18 @@ An [Obsidian](https://obsidian.md) plugin for tracking **Movies & TV Shows**. Di
 
 ## 📖 Usage
 
-![](Attachments/demo.gif)
+### Managing Your Library
 
 **Add a title → Rate it → Track seasons & episodes → Add personal notes → Edit details → Update information → Watch trailer**
+
+![](Attachments/demo.gif)
+
+### Searching Your Library
+
+Search your collection by title, director (creator, for TV), and cast.
+> Title is always searched. Director and Cast can be toggled in **Gallery Settings** (both are on by default).
+
+![](Attachments/demo-2.gif)
 
 ---
 
@@ -87,30 +96,31 @@ YourVault/
 - Go to **Settings → TerroTrack → TMDB API key**.
 - Paste your key.
 
-If you don't have one, see [How to get your free TMDB API key](#How-to-get-your-free-TMDB-API-key) below.
+Don't have one? See [How to get your free TMDB API key](#How-to-get-your-free-TMDB-API-key).
 
-### 2. View your Library
+### 2. Open your Library
 
-In any note, add one of these code blocks:
+In any note, add either:
 
 ````
 ```terro-movie
+
 ```
 ````
 or
 ````
 ```terro-tv
+
 ```
 ````
-Both render the same interface — a **Movies / TV Shows** tab bar. The only difference is which tab opens first.
 
-### 3. Add your first title.
-Click:
+Both render the same interface with **Movies / TV Shows** tabs. The only difference is which tab opens first.
 
-* **+ Add Movie**
-* **+ Add Show**
+### 3. Add your first title
 
-You can search TMDB and select a result, or skip the search and use the **OR ENTER MANUALLY** form for titles that aren't available on TMDB.
+Click `+ Add Movie` or `+ Add Show`.
+
+Search TMDB and select a result, or use **OR ENTER MANUALLY** for titles that aren't available on TMDB.
 
 ---
 
@@ -207,15 +217,8 @@ Without it, the plugin still works — manual entry, gallery, filters, sorting, 
 
 ## 📱 Compatibility
 
-TerroTrack is designed to work on:
-
-* Windows
-* macOS
-* Linux
-* Android
-* iOS
-
-through Obsidian's desktop and mobile applications.
+* **Desktop:** Windows · macOS · Linux
+* **Mobile:** Android · iOS
 
 ---
 
