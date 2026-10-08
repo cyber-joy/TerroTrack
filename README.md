@@ -204,6 +204,14 @@ Everything is plain JSON — you can open, edit, or move it outside Obsidian.
 
 ---
 
+## 🔄 Updating
+
+Download the latest release and replace the existing `TerroTrack` plugin folder with the new version.
+
+Your library data will remain intact.
+
+---
+
 ## How to get your free TMDB API key
 1. Create a free account at [themoviedb.org](https://www.themoviedb.org).
 2. Go to **Settings → [API](https://www.themoviedb.org/settings/api)**.
