@@ -116,6 +116,8 @@ or
 
 Both render the same interface with **Movies / TV Shows** tabs. The only difference is which tab opens first.
 
+![](Attachments/demo-3.gif)
+
 ### 3. Add your first title
 
 Click `+ Add Movie` or `+ Add Show`.
