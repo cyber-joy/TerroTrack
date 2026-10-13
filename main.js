@@ -7,6 +7,11 @@ const DEFAULT_SETTINGS = {
   dataFile: "movies.json",
   tvDataFile: "tvshows.json",
   activityFile: "activity.json",
+  collectionsFile: "collections.json",
+  notesFolder: "TerroTrack Notes",
+  syncNoteProps: true,
+  moviesView: "grid",
+  tvView: "grid",
   cardFields: {
     favorite: true,
     title: true,
@@ -14,15 +19,10 @@ const DEFAULT_SETTINGS = {
     rating: true,
     genres: false,
     director: false,
-    cast: false,
     status: false,
-    release_date: false,
     runtime: false,
     language: false,
-    budget: false,
     myRating: true,
-    overview: false,
-    notes: false,
   },
   cardsPerRow: "auto",
   cardSize: "medium",
@@ -33,17 +33,13 @@ const DEFAULT_SETTINGS = {
     rating: true,
     genres: false,
     director: false,
-    cast: false,
     status: false,
-    release_date: false,
     runtime: false,
     language: false,
     seasons: false,
     episodes: false,
     network: false,
     myRating: true,
-    overview: false,
-    notes: false,
   },
   tvCardsPerRow: "auto",
   tvCardSize: "medium",
@@ -368,6 +364,7 @@ const TMDB_GENRE_NAMES = {
   tv: Object.fromEntries(Object.entries(TMDB_GENRES.tv).map(([n, id]) => [id, n])),
 };
 const DISCOVER_TTL = 30 * 60 * 1000;
+const CARD_SIZE_PX_COLLECTION = 130;
 
 function discoverTitle(item, media) {
   return media === "movie" ? item.title : item.name;
@@ -765,6 +762,20 @@ function statusFields(v) {
   return { watched: v === "watched", ...(v === "watching" || v === "dropped" ? { status: v } : {}) };
 }
 
+// Sort by your own rating. Titles you haven't rated always go last, in either direction.
+function byMyRating(dir) {
+  return (a, b) => {
+    const av = parseFloat(a.myRating);
+    const bv = parseFloat(b.myRating);
+    const an = isNaN(av);
+    const bn = isNaN(bv);
+    if (an && bn) return 0;
+    if (an) return 1;
+    if (bn) return -1;
+    return (av - bv) * dir;
+  };
+}
+
 // How many separate year filters are active: a range counts once.
 function countYearRuns(years) {
   const ys = [...new Set((years || []).map(Number))].filter((n) => !isNaN(n)).sort((a, b) => a - b);
@@ -875,6 +886,20 @@ function buildDateChip(parent, { value, label, empty, onPick, cls }) {
   return wrap;
 }
 
+// Change a title's status and keep the heatmap log in step.
+// "watched" activity exists exactly while a watched date is stored.
+function changeStatus(plugin, entry, kind, value, dateKey) {
+  if (statusOf(entry) === "watched" && entry.watchedDate) {
+    plugin.logActivity(kind, -1, entry.watchedDate);
+    delete entry.watchedDate;
+  }
+  setStatus(entry, value);
+  if (value === "watched") {
+    entry.watchedDate = dateKey || localDateKey(new Date());
+    plugin.logActivity(kind, 1, entry.watchedDate);
+  }
+}
+
 // Four-way status switch. Heatmap rule: a "watched" activity exists exactly while a
 // watched date is stored, so changing status keeps the log in step.
 function buildStatusControl(modal, parent, entry, kind) {
@@ -891,15 +916,7 @@ function buildStatusControl(modal, parent, entry, kind) {
     b.createSpan({ text: label });
     b.addEventListener("click", async () => {
       if (value === current) return;
-      if (current === "watched" && entry.watchedDate) {
-        plugin.logActivity(kind, -1, entry.watchedDate);
-        delete entry.watchedDate;
-      }
-      setStatus(entry, value);
-      if (value === "watched") {
-        entry.watchedDate = (kind === "tv" && modal._logDate) || localDateKey(new Date());
-        plugin.logActivity(kind, 1, entry.watchedDate);
-      }
+      changeStatus(plugin, entry, kind, value, (kind === "tv" && modal._logDate) || undefined);
       await save(entry);
       modal.renderView();
     });
@@ -1244,6 +1261,20 @@ function buildDataTools(contentEl, cfg) {
     progressEl.setText(path ? `Backup saved to ${path}` : "Backup cancelled.");
   });
 
+  // -- Rebuild heatmap (movies) --
+  if (cfg.rebuild) {
+    const rebuildCtl = makeRow("Rebuild heatmap", "Recount movies from their watched dates. TV activity is kept.");
+    const rebuildBtn = makeActionBtn(rebuildCtl, "movie-data-btn", "refresh", "Rebuild");
+    rebuildBtn.addEventListener("click", async () => {
+      rebuildBtn.disabled = true;
+      setActionBtnLabel(rebuildBtn, "Rebuilding…", true);
+      const res = await cfg.rebuild();
+      setActionBtnLabel(rebuildBtn, "Rebuild", false);
+      rebuildBtn.disabled = false;
+      progressEl.setText(`Heatmap rebuilt from ${res.counted} dated ${res.counted === 1 ? "movie" : "movies"} across ${res.days} ${res.days === 1 ? "day" : "days"}.`);
+    });
+  }
+
   // -- Import --
   const importCtl = makeRow("Import", cfg.importDesc);
   const importBtn = makeActionBtn(importCtl, "movie-data-btn", "upload", "Choose file");
@@ -1278,14 +1309,271 @@ function buildDataTools(contentEl, cfg) {
     const parts = [`Imported ${imported} (${formatLabel} format)`];
     if (skipped) parts.push(`${skipped} already in library or not a ${cfg.skipNoun} title`);
     if (failed) parts.push(`${failed} couldn't be matched`);
+    if (res.dated) parts.push(`${res.dated} watched ${res.dated === 1 ? "date" : "dates"} added to the heatmap`);
     progressEl.setText(parts.join(", ") + ".");
   });
+}
+
+// ---------- Shared bits for views, selection, people, collections ----------
+function mgSvg(inner, size = 16) {
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
+}
+
+const MG_ICONS = {
+  grid: mgSvg('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>', 15),
+  list: mgSvg('<path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/>', 15),
+  select: mgSvg('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="m9 12 2 2 4-4"/>', 15),
+  dice: mgSvg('<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1"/><circle cx="16" cy="8" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="8" cy="16" r="1"/><circle cx="16" cy="16" r="1"/>', 15),
+  layers: mgSvg('<path d="m12 2 10 5-10 5L2 7Z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/>'),
+  bell: mgSvg('<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>', 15),
+  folderPlus: mgSvg('<path d="M12 10v6M9 13h6"/><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>'),
+  note: mgSvg('<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5Z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/>'),
+  check: mgSvg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 14),
+  x: mgSvg('<path d="M18 6 6 18M6 6l12 12"/>', 14),
+  back: mgSvg('<path d="m15 6-6 6 6 6"/>', 16),
+};
+
+ACTION_ICONS.note = MG_ICONS.note;
+
+function splitNames(text) {
+  return String(text || "").split(",").map((x) => x.trim()).filter(Boolean);
+}
+
+// Exact-name match inside the comma-separated director/creator or cast field.
+function personMatches(entry, person, kind) {
+  if (!person) return true;
+  const field = person.role === "cast" ? entry.cast : kind === "tv" ? entry.creators : entry.director;
+  const needle = person.name.toLowerCase();
+  return splitNames(field).some((n) => n.toLowerCase() === needle);
+}
+
+// Names in the details become buttons that filter the library by that person.
+function buildPeople(parent, text, role, onPick) {
+  const wrap = parent.createDiv({ cls: "movie-detail-fact-value mg-people" });
+  splitNames(text).forEach((name, i, arr) => {
+    const b = wrap.createEl("button", { cls: "mg-person", text: name, attr: { type: "button", title: `Show titles with ${name}` } });
+    b.addEventListener("click", () => onPick(name, role));
+    if (i < arr.length - 1) wrap.createSpan({ cls: "mg-person-sep", text: "," });
+  });
+  return wrap;
+}
+
+class PromptModal extends Modal {
+  constructor(app, opts) {
+    super(app);
+    this.o = opts;
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.addClass("movie-prompt-modal");
+    contentEl.createEl("h3", { text: this.o.title });
+    const input = contentEl.createEl("input", { type: "text", cls: "mg-prompt-input", attr: { placeholder: this.o.placeholder || "" } });
+    input.value = this.o.value || "";
+    const row = contentEl.createDiv({ cls: "mg-prompt-actions" });
+    row.createEl("button", { text: "Cancel", cls: "mg-note-btn" }).addEventListener("click", () => this.close());
+    const ok = row.createEl("button", { text: this.o.cta || "Save", cls: "mg-note-btn is-primary" });
+    const submit = async () => {
+      const v = input.value.trim();
+      if (!v) return;
+      await this.o.onSubmit(v);
+      this.close();
+    };
+    ok.addEventListener("click", submit);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") submit();
+    });
+    setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 30);
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
+// Add one or many titles to collections. A row is "on" when every title is in it.
+class CollectionPickerModal extends Modal {
+  constructor(app, plugin, items, onDone) {
+    super(app);
+    this.plugin = plugin;
+    this.items = items;
+    this.onDone = onDone;
+  }
+  onOpen() {
+    this.contentEl.addClass("movie-picker-modal");
+    this.render();
+  }
+  render() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h3", { text: this.items.length === 1 ? "Add to collection" : `Add ${this.items.length} titles to a collection` });
+
+    const create = contentEl.createDiv({ cls: "mg-picker-new" });
+    const input = create.createEl("input", { type: "text", cls: "mg-prompt-input", attr: { placeholder: "New collection name…" } });
+    const btn = create.createEl("button", { text: "Create", cls: "mg-note-btn is-primary" });
+    const make = async () => {
+      const name = input.value.trim();
+      if (!name) return;
+      const c = await this.plugin.createCollection(name);
+      await this.plugin.setInCollection(c.id, this.items, true);
+      this.render();
+    };
+    btn.addEventListener("click", make);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") make();
+    });
+
+    const list = contentEl.createDiv({ cls: "mg-picker-list" });
+    const cols = this.plugin.collections || [];
+    if (!cols.length) list.createDiv({ cls: "mg-picker-empty", text: "No collections yet. Create your first one above." });
+    cols.forEach((c) => {
+      const n = this.items.filter((it) => this.plugin.collectionHas(c, it.t, it.id)).length;
+      const all = n === this.items.length;
+      const row = list.createEl("button", { cls: "mg-picker-row" + (all ? " is-on" : n ? " is-partial" : "") });
+      row.createSpan({ cls: "mg-picker-check" }).innerHTML = all ? MG_ICONS.check : "";
+      row.createSpan({ cls: "mg-picker-name", text: c.name });
+      row.createSpan({ cls: "mg-picker-count", text: `${c.items.length}` });
+      row.addEventListener("click", async () => {
+        await this.plugin.setInCollection(c.id, this.items, !all);
+        this.render();
+      });
+    });
+    const done = contentEl.createDiv({ cls: "mg-prompt-actions" });
+    done.createEl("button", { text: "Done", cls: "mg-note-btn is-primary" }).addEventListener("click", () => this.close());
+  }
+  onClose() {
+    this.contentEl.empty();
+    if (this.onDone) this.onDone();
+  }
+}
+
+// "Pick something for me": a random title from To Watch, optionally limited.
+class PickModal extends Modal {
+  constructor(app, plugin, kind, items, openDetails) {
+    super(app);
+    this.plugin = plugin;
+    this.kind = kind;
+    this.items = items;
+    this.openDetails = openDetails;
+    this.genre = "";
+    this.length = "";
+    this.last = null;
+  }
+
+  runtimeOf(e) {
+    return this.kind === "movie" ? e.runtime || 0 : e.episode_runtime || 0;
+  }
+
+  pool() {
+    const max = parseInt(this.length, 10) || 0;
+    return this.items.filter((e) => {
+      if (statusOf(e) !== "unwatched") return false;
+      if (this.genre && !splitNames(e.genres).includes(this.genre)) return false;
+      if (max && !(this.runtimeOf(e) > 0 && this.runtimeOf(e) <= max)) return false;
+      return true;
+    });
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.addClass("movie-pick-modal");
+    contentEl.createEl("h3", { text: this.kind === "movie" ? "Pick a movie for me" : "Pick a show for me" });
+    contentEl.createDiv({ cls: "mg-pick-sub", text: "A random pick from your To Watch list." });
+
+    const opts = contentEl.createDiv({ cls: "mg-pick-options" });
+    const genres = Array.from(new Set(this.items.filter((e) => statusOf(e) === "unwatched").flatMap((e) => splitNames(e.genres)))).sort();
+    const g = opts.createEl("select", { cls: "mg-pick-select" });
+    g.createEl("option", { text: "Any genre", attr: { value: "" } });
+    genres.forEach((x) => g.createEl("option", { text: x, attr: { value: x } }));
+    g.addEventListener("change", () => {
+      this.genre = g.value;
+      this.last = null;
+      this.pick();
+    });
+    const l = opts.createEl("select", { cls: "mg-pick-select" });
+    const lengths = this.kind === "movie" ? [["", "Any length"], ["90", "Up to 90 min"], ["120", "Up to 2 h"], ["150", "Up to 2 h 30"]] : [["", "Any episode length"], ["30", "Up to 30 min"], ["45", "Up to 45 min"], ["60", "Up to 60 min"]];
+    lengths.forEach(([v, t]) => l.createEl("option", { text: t, attr: { value: v } }));
+    l.addEventListener("change", () => {
+      this.length = l.value;
+      this.last = null;
+      this.pick();
+    });
+
+    this.resultEl = contentEl.createDiv({ cls: "mg-pick-result" });
+    this.pick();
+  }
+
+  pick() {
+    const pool = this.pool();
+    const res = this.resultEl;
+    res.empty();
+    if (!pool.length) {
+      res.createDiv({ cls: "mg-pick-empty", text: "Nothing in To Watch matches. Loosen the filters, or add more titles." });
+      return;
+    }
+    const choices = pool.length > 1 ? pool.filter((e) => e.id !== this.last) : pool;
+    const e = choices[Math.floor(Math.random() * choices.length)];
+    this.last = e.id;
+    this.current = e;
+
+    const card = res.createDiv({ cls: "mg-pick-card" });
+    const url = getPosterUrl(e);
+    if (url) card.createEl("img", { cls: "mg-pick-poster", attr: { src: url, alt: "" } });
+    const info = card.createDiv({ cls: "mg-pick-info" });
+    const title = this.kind === "movie" ? e.title : e.name;
+    info.createDiv({ cls: "mg-pick-title", text: title });
+    const meta = [e.year, e.rating ? `★ ${e.rating}` : "", this.runtimeOf(e) ? `${this.runtimeOf(e)} min${this.kind === "tv" ? " / ep" : ""}` : "", this.kind === "tv" && e.number_of_seasons ? `${e.number_of_seasons} season${e.number_of_seasons === 1 ? "" : "s"}` : ""].filter(Boolean);
+    info.createDiv({ cls: "mg-pick-meta", text: meta.join(" · ") });
+    if (e.genres) info.createDiv({ cls: "mg-pick-genres", text: e.genres });
+    if (e.overview) info.createDiv({ cls: "mg-pick-overview", text: e.overview });
+    info.createDiv({ cls: "mg-pick-count", text: `${pool.length} to choose from` });
+
+    const actions = res.createDiv({ cls: "mg-pick-actions" });
+    const again = makeActionBtn(actions, "movie-data-btn", "refresh", "Pick again");
+    again.addEventListener("click", () => this.pick());
+    const details = actions.createEl("button", { cls: "movie-data-btn", text: "Details" });
+    details.addEventListener("click", () => {
+      this.close();
+      this.openDetails(e);
+    });
+    const start = actions.createEl("button", { cls: "movie-data-btn is-primary", text: "Start watching" });
+    start.addEventListener("click", async () => {
+      changeStatus(this.plugin, e, this.kind, "watching");
+      if (this.kind === "movie") await this.plugin.updateMovie(e);
+      else await this.plugin.updateShow(e);
+      new Notice(`Enjoy ${title}!`);
+      this.close();
+    });
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
+// Filters for the ```terro-movie / terro-tv code blocks, e.g. status=watching genre=Drama
+function parseEmbedParams(source) {
+  const out = {};
+  String(source || "").split("\n").forEach((line) => {
+    const t = line.trim();
+    if (!t || t.startsWith("#") || t.startsWith("//")) return;
+    const pairs = [...t.matchAll(/([a-zA-Z_]+)\s*=\s*("([^"]*)"|\S+)/g)];
+    if (pairs.length) {
+      pairs.forEach((m) => (out[m[1].toLowerCase()] = (m[3] !== undefined ? m[3] : m[2]).trim()));
+      return;
+    }
+    const kv = t.match(/^([a-zA-Z_]+)\s*:\s*(.+)$/);
+    if (kv) out[kv[1].toLowerCase()] = kv[2].replace(/^"|"$/g, "").trim();
+  });
+  return out;
 }
 
 class MovieGalleryPlugin extends Plugin {
   async onload() {
     await this.loadSettings();
     await this.loadActivity();
+    await this.loadCollections();
     this.galleryEls = new Set();
     this.galleryStates = new Map();
     this.activeTabByEl = new Map();
@@ -1294,8 +1582,11 @@ class MovieGalleryPlugin extends Plugin {
     this.addSettingTab(new MovieGallerySettingTab(this.app, this));
     installCustomDropdowns(this);
 
+    // With no options the block is the full library; with options it is a filtered embed.
     this.registerMarkdownCodeBlockProcessor("terro-movie", (source, el) => {
       this.galleryEls.add(el);
+      const params = parseEmbedParams(source);
+      if (Object.keys(params).length) el.__terroEmbed = { type: "movies", ...params };
       this.renderGallery(el);
     });
 
@@ -1303,6 +1594,8 @@ class MovieGalleryPlugin extends Plugin {
       this.galleryEls.add(el);
       if (!this.activeTabByEl) this.activeTabByEl = new Map();
       this.activeTabByEl.set(el, "tv");
+      const params = parseEmbedParams(source);
+      if (Object.keys(params).length) el.__terroEmbed = { type: "tv", ...params };
       this.renderGallery(el);
     });
 
@@ -1324,6 +1617,7 @@ class MovieGalleryPlugin extends Plugin {
     this.galleryStates?.clear();
     this.tvGalleryStates?.clear();
     this.activeTabByEl?.clear();
+    if (this._weekPanel) this._weekPanel.close();
     if (this._activitySaveTimer) {
       clearTimeout(this._activitySaveTimer);
       this._activitySaveTimer = null;
@@ -1339,6 +1633,27 @@ class MovieGalleryPlugin extends Plugin {
     // Older versions kept the heatmap log inside data.json; it now has its own file.
     this._legacyActivity = data.activity && typeof data.activity === "object" ? data.activity : null;
     delete this.settings.activity;
+  }
+
+  // Recount the movie half of the heatmap from every title's watchedDate.
+  // TV counts come from episode steps, which can't be recomputed, so they are kept.
+  async rebuildMovieActivity() {
+    const movies = await this.readMovies();
+    const next = {};
+    Object.entries(this.activity || {}).forEach(([k, v]) => {
+      if (v && v.t) next[k] = { m: 0, t: v.t };
+    });
+    let counted = 0;
+    movies.forEach((m) => {
+      if (statusOf(m) !== "watched" || !m.watchedDate) return;
+      const d = (next[m.watchedDate] = next[m.watchedDate] || { m: 0, t: 0 });
+      d.m++;
+      counted++;
+    });
+    this.activity = next;
+    await this.writeActivity();
+    this.refreshGalleries();
+    return { counted, days: Object.keys(next).filter((k) => next[k].m).length };
   }
 
   // ---- activity.json: { "YYYY-MM-DD": { m: movies, t: tv } } ----
@@ -1437,6 +1752,7 @@ class MovieGalleryPlugin extends Plugin {
     const movies = await this.readMovies();
     const filtered = movies.filter((m) => m.id !== id);
     await this.writeMovies(filtered);
+    await this.dropFromCollections("movie", [id]);
     this.refreshGalleries();
   }
 
@@ -1445,6 +1761,7 @@ class MovieGalleryPlugin extends Plugin {
     const idx = movies.findIndex((m) => m.id === updatedMovie.id);
     if (idx !== -1) movies[idx] = updatedMovie;
     await this.writeMovies(movies);
+    this.syncTitleNote(updatedMovie, "movie");
     this.refreshGalleries();
   }
 
@@ -1548,6 +1865,7 @@ class MovieGalleryPlugin extends Plugin {
   async removeShow(id) {
     const shows = await this.readShows();
     await this.writeShows(shows.filter((s) => s.id !== id));
+    await this.dropFromCollections("tv", [id]);
     this.refreshGalleries();
   }
 
@@ -1556,6 +1874,7 @@ class MovieGalleryPlugin extends Plugin {
     const idx = shows.findIndex((s) => s.id === updatedShow.id);
     if (idx !== -1) shows[idx] = updatedShow;
     await this.writeShows(shows);
+    this.syncTitleNote(updatedShow, "tv");
     this.refreshGalleries();
   }
 
@@ -2505,11 +2824,27 @@ class MovieGalleryPlugin extends Plugin {
     const existing = await this.readMovies();
     const existingIds = new Set(existing.map((m) => String(m.id)));
     const existingTitles = new Set(existing.map((m) => `${m.title}|${m.year}`.toLowerCase()));
+    const byKey = new Map(existing.map((m) => [`${m.title}|${m.year}`.toLowerCase(), m]));
     const isWatchlistFile = /watchlist/i.test(filename || "");
+
+    // Letterboxd diary.csv has a real "Watched Date". Rewatches repeat a film, so the
+    // latest viewing is the one kept (a title stores a single watched date).
+    const isDiary = format === "letterboxd" && headers.includes("Watched Date");
+    const latestRow = new Map();
+    if (isDiary) {
+      rows.forEach((r, i) => {
+        const k = `${r["Name"]}|${r["Year"]}`.toLowerCase();
+        const d = (r["Watched Date"] || "").trim().slice(0, 10);
+        const cur = latestRow.get(k);
+        if (!cur || d > cur.d) latestRow.set(k, { i, d });
+      });
+    }
+    const validDate = (d) => (/^\d{4}-\d{2}-\d{2}$/.test(d) ? d : "");
 
     let imported = 0;
     let skipped = 0;
     let failed = 0;
+    let dated = 0;
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
@@ -2550,15 +2885,34 @@ class MovieGalleryPlugin extends Plugin {
         const title = row["Name"];
         const year = row["Year"];
         const key = `${title}|${year}`.toLowerCase();
+        if (isDiary && latestRow.get(key) && latestRow.get(key).i !== i) {
+          if (onProgress) onProgress(i + 1, rows.length); // an older viewing of the same film
+          continue;
+        }
+        const when = isDiary ? validDate((row["Watched Date"] || "").trim().slice(0, 10)) : "";
         if (!title || existingTitles.has(key)) {
-          if (title) skipped++;
-          else failed++;
+          if (title) {
+            skipped++;
+            // already in the library: just give it its date so the heatmap fills in
+            const ex = byKey.get(key);
+            if (when && ex && !ex.watchedDate && statusOf(ex) !== "dropped") {
+              setStatus(ex, "watched");
+              ex.watchedDate = when;
+              this.logActivity("movie", 1, when);
+              dated++;
+            }
+          } else failed++;
           if (onProgress) onProgress(i + 1, rows.length);
           continue;
         }
         const stars = parseFloat(row["Rating"]);
         const myRating = !isNaN(stars) ? String(Math.round(stars * 2)) : "";
         movie = await this.resolveViaSearch(title, year, { myRating, watched: !isWatchlistFile });
+        if (movie && when && movie.watched) {
+          movie.watchedDate = when;
+          this.logActivity("movie", 1, when);
+          dated++;
+        }
       } else if (format === "imdb") {
         const title = row["Title"];
         const year = row["Year"];
@@ -2596,7 +2950,7 @@ class MovieGalleryPlugin extends Plugin {
 
     await this.writeMovies(existing);
     this.refreshGalleries();
-    return { imported, skipped, failed, format };
+    return { imported, skipped, failed, format, dated };
   }
 
   refreshGalleries() {
@@ -2636,7 +2990,8 @@ class MovieGalleryPlugin extends Plugin {
 
       return (
         matchesSearch && matchesFilter && matchesGenre && matchesLanguage &&
-        matchesYear && matchesRating && matchesMyRating && (!state.favOnly || !!m.favorite)
+        matchesYear && matchesRating && matchesMyRating && (!state.favOnly || !!m.favorite) &&
+        personMatches(m, state.person, "movie")
       );
     });
 
@@ -2645,6 +3000,7 @@ class MovieGalleryPlugin extends Plugin {
       case "title": result.sort((a, b) => a.title.localeCompare(b.title) * dir); break;
       case "year": result.sort((a, b) => (a.year || "").localeCompare(b.year || "") * dir); break;
       case "rating": result.sort((a, b) => (parseFloat(a.rating || 0) - parseFloat(b.rating || 0)) * dir); break;
+      case "myrating": result.sort(byMyRating(dir)); break;
       case "runtime": result.sort((a, b) => ((a.runtime || 0) - (b.runtime || 0)) * dir); break;
       case "added":
       default:
@@ -3024,15 +3380,865 @@ class MovieGalleryPlugin extends Plugin {
     return btn;
   }
 
+  // ---------------- Collections ----------------
+  async loadCollections() {
+    const path = this.settings.collectionsFile || "collections.json";
+    this.collections = [];
+    try {
+      if (await this.app.vault.adapter.exists(path)) {
+        const raw = await this.app.vault.adapter.read(path);
+        let parsed = [];
+        try {
+          parsed = raw.trim() ? JSON.parse(raw) : [];
+        } catch (e) {
+          await this.app.vault.adapter.write(path + ".bak", raw);
+          new Notice(`TerroTrack: ${path} was unreadable. A copy was kept as ${path}.bak.`);
+        }
+        if (Array.isArray(parsed)) {
+          this.collections = parsed
+            .filter((c) => c && c.id && typeof c.name === "string")
+            .map((c) => ({ ...c, items: Array.isArray(c.items) ? c.items.filter((x) => x && (x.t === "movie" || x.t === "tv")) : [] }));
+        }
+      } else {
+        await this.saveCollections();
+      }
+    } catch (e) {
+      console.error("TerroTrack: could not read collections file", e);
+    }
+  }
+
+  async saveCollections() {
+    const path = this.settings.collectionsFile || "collections.json";
+    await this.app.vault.adapter.write(path, JSON.stringify(this.collections || [], null, 2));
+  }
+
+  collectionHas(c, t, id) {
+    return c.items.some((x) => x.t === t && String(x.id) === String(id));
+  }
+
+  async createCollection(name) {
+    const c = { id: "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name: name.trim(), created: new Date().toISOString(), items: [] };
+    this.collections = this.collections || [];
+    this.collections.push(c);
+    await this.saveCollections();
+    this.refreshGalleries();
+    return c;
+  }
+
+  async renameCollection(id, name) {
+    const c = (this.collections || []).find((x) => x.id === id);
+    if (!c) return;
+    c.name = name.trim();
+    await this.saveCollections();
+    this.refreshGalleries();
+  }
+
+  async deleteCollection(id) {
+    this.collections = (this.collections || []).filter((x) => x.id !== id);
+    await this.saveCollections();
+    this.refreshGalleries();
+  }
+
+  async setInCollection(id, items, on) {
+    const c = (this.collections || []).find((x) => x.id === id);
+    if (!c) return;
+    items.forEach((it) => {
+      const has = this.collectionHas(c, it.t, it.id);
+      if (on && !has) c.items.push({ t: it.t, id: it.id });
+      if (!on && has) c.items = c.items.filter((x) => !(x.t === it.t && String(x.id) === String(it.id)));
+    });
+    await this.saveCollections();
+    this.refreshGalleries();
+  }
+
+  async dropFromCollections(t, ids) {
+    const set = new Set(ids.map(String));
+    let changed = false;
+    (this.collections || []).forEach((c) => {
+      const before = c.items.length;
+      c.items = c.items.filter((x) => !(x.t === t && set.has(String(x.id))));
+      if (c.items.length !== before) changed = true;
+    });
+    if (changed) await this.saveCollections();
+  }
+
+  // ---------------- Bulk actions ----------------
+  async bulkApply(kind, ids, mutate) {
+    const list = kind === "movie" ? await this.readMovies() : await this.readShows();
+    const touched = [];
+    list.forEach((e) => {
+      if (ids.has(e.id)) {
+        mutate(e);
+        touched.push(e);
+      }
+    });
+    if (kind === "movie") await this.writeMovies(list);
+    else await this.writeShows(list);
+    touched.forEach((e) => this.syncTitleNote(e, kind));
+    this.refreshGalleries();
+    return touched.length;
+  }
+
+  async bulkDelete(kind, ids) {
+    const list = kind === "movie" ? await this.readMovies() : await this.readShows();
+    const next = list.filter((e) => !ids.has(e.id));
+    if (kind === "movie") await this.writeMovies(next);
+    else await this.writeShows(next);
+    await this.dropFromCollections(kind, [...ids]);
+    this.refreshGalleries();
+    return list.length - next.length;
+  }
+
+  buildBulkBar(el, state, kind, ctx) {
+    if (!state.selecting) return;
+    const bar = el.createDiv({ cls: "mg-bulkbar" });
+    const count = bar.createSpan({ cls: "mg-bulk-count" });
+    const update = () => {
+      count.setText(`${state.selected.size} selected`);
+      bar.toggleClass("is-empty", state.selected.size === 0);
+    };
+    state._bulkUpdate = update;
+    update();
+
+    const selAll = bar.createEl("button", { cls: "mg-bulk-btn", text: "Select all" });
+    selAll.addEventListener("click", () => {
+      ctx.getVisible().forEach((x) => state.selected.add(x.id));
+      ctx.rerenderGrid(true);
+      update();
+    });
+    const clear = bar.createEl("button", { cls: "mg-bulk-btn", text: "Clear" });
+    clear.addEventListener("click", () => {
+      state.selected.clear();
+      ctx.rerenderGrid(true);
+      update();
+    });
+
+    const statusSel = bar.createEl("select", { cls: "mg-bulk-select" });
+    statusSel.createEl("option", { text: "Set status…", attr: { value: "" } });
+    STATUS_OPTIONS.forEach(([v, label]) => statusSel.createEl("option", { text: label, attr: { value: v } }));
+    statusSel.addEventListener("change", async () => {
+      const v = statusSel.value;
+      if (!v || !state.selected.size) return (statusSel.value = "");
+      const n = await this.bulkApply(kind, new Set(state.selected), (e) => changeStatus(this, e, kind, v));
+      new Notice(`Updated ${n} title${n === 1 ? "" : "s"}`);
+      state.selected.clear();
+      ctx.rerenderSection();
+    });
+
+    const fav = bar.createEl("button", { cls: "mg-bulk-btn" });
+    fav.innerHTML = `${HEART_SVG}<span>Favourite</span>`;
+    fav.addEventListener("click", async () => {
+      if (!state.selected.size) return;
+      const chosen = ctx.getAll().filter((x) => state.selected.has(x.id));
+      const turnOn = !chosen.every((x) => x.favorite);
+      const n = await this.bulkApply(kind, new Set(state.selected), (e) => {
+        e.favorite = turnOn;
+      });
+      new Notice(`${turnOn ? "Favourited" : "Unfavourited"} ${n} title${n === 1 ? "" : "s"}`);
+      ctx.rerenderSection();
+    });
+
+    const col = bar.createEl("button", { cls: "mg-bulk-btn" });
+    col.innerHTML = `${MG_ICONS.folderPlus}<span>Collection</span>`;
+    col.addEventListener("click", () => {
+      if (!state.selected.size) return;
+      new CollectionPickerModal(this.app, this, [...state.selected].map((id) => ({ t: kind, id }))).open();
+    });
+
+    const del = bar.createEl("button", { cls: "mg-bulk-btn is-danger" });
+    del.innerHTML = `${ACTION_ICONS.trash}<span>Delete</span>`;
+    del.addEventListener("click", async () => {
+      const n = state.selected.size;
+      if (!n || !confirm(`Delete ${n} title${n === 1 ? "" : "s"} from your library?`)) return;
+      await this.bulkDelete(kind, new Set(state.selected));
+      state.selected.clear();
+      ctx.rerenderSection();
+    });
+
+    const done = bar.createEl("button", { cls: "mg-bulk-btn is-primary", text: "Done" });
+    done.addEventListener("click", () => {
+      state.selecting = false;
+      state.selected.clear();
+      ctx.rerenderSection();
+    });
+  }
+
+  // ---------------- View tools (grid / list, select, pick) ----------------
+  buildViewTools(parent, state, kind, ctx) {
+    const group = parent.createDiv({ cls: "movie-gallery-view-group mg-view-tools" });
+    ["grid", "list"].forEach((mode) => {
+      const b = group.createEl("button", {
+        cls: "movie-gallery-group-btn mg-view-btn" + (state.view === mode ? " is-on" : ""),
+        attr: { "aria-label": `${mode === "grid" ? "Poster grid" : "List"} view`, "aria-pressed": String(state.view === mode), title: mode === "grid" ? "Poster grid" : "List view" },
+      });
+      b.innerHTML = MG_ICONS[mode];
+      b.addEventListener("click", async () => {
+        if (state.view === mode) return;
+        state.view = mode;
+        this.settings[kind === "movie" ? "moviesView" : "tvView"] = mode;
+        await this.saveSettings();
+        ctx.rerenderSection();
+      });
+    });
+    const sel = group.createEl("button", {
+      cls: "movie-gallery-group-btn mg-view-btn" + (state.selecting ? " is-on" : ""),
+      attr: { "aria-label": "Select titles", "aria-pressed": String(!!state.selecting), title: "Select several titles" },
+    });
+    sel.innerHTML = MG_ICONS.select;
+    sel.addEventListener("click", () => {
+      state.selecting = !state.selecting;
+      state.selected.clear();
+      ctx.rerenderSection();
+    });
+    const pick = group.createEl("button", { cls: "movie-gallery-group-btn mg-view-btn", attr: { "aria-label": "Pick something for me", title: "Pick something for me" } });
+    pick.innerHTML = MG_ICONS.dice;
+    pick.addEventListener("click", () => new PickModal(this.app, this, kind, ctx.getAll(), ctx.openDetails).open());
+  }
+
+  // Sortable table used instead of the poster grid.
+  renderListView(host, items, kind, state, ctx) {
+    const table = host.createEl("table", { cls: "mg-list" });
+    const head = table.createEl("thead").createEl("tr");
+    const cols = [];
+    if (state.selecting) cols.push({ key: "", label: "" });
+    cols.push({ key: "", label: "" }, { key: "title", label: "Title" }, { key: "year", label: "Year" }, { key: "rating", label: "★" }, { key: "myrating", label: "Mine" });
+    cols.push(kind === "movie" ? { key: "runtime", label: "Runtime" } : { key: "runtime", label: "Seasons · Eps" });
+    cols.push({ key: "", label: "Status" }, { key: "", label: "" });
+    cols.forEach((c) => {
+      const th = head.createEl("th", { cls: c.key ? "is-sortable" : "" });
+      th.createSpan({ text: c.label });
+      if (c.key && state.sortField === c.key) th.createSpan({ cls: "mg-list-arrow", text: state.sortDir === "asc" ? " ▲" : " ▼" });
+      if (c.key) {
+        th.addEventListener("click", () => {
+          if (state.sortField === c.key) state.sortDir = state.sortDir === "asc" ? "desc" : "asc";
+          else {
+            state.sortField = c.key;
+            state.sortDir = c.key === "title" ? "asc" : "desc";
+          }
+          ctx.rerenderSection();
+        });
+      }
+    });
+
+    const body = table.createEl("tbody");
+    items.forEach((e) => {
+      const tr = body.createEl("tr", { cls: "mg-list-row" + (state.selected.has(e.id) ? " is-selected" : "") });
+      const st = statusOf(e);
+      if (state.selecting) {
+        const td = tr.createEl("td", { cls: "mg-list-sel" });
+        td.createDiv({ cls: "mg-sel-box" + (state.selected.has(e.id) ? " is-on" : "") }).innerHTML = MG_ICONS.check;
+      }
+      const thumb = tr.createEl("td", { cls: "mg-list-thumb" });
+      const url = getPosterUrl(e);
+      if (url) thumb.createEl("img", { attr: { src: url, alt: "", loading: "lazy" } });
+      const name = kind === "movie" ? e.title : e.name;
+      const tdTitle = tr.createEl("td", { cls: "mg-list-title" });
+      tdTitle.createDiv({ cls: "mg-list-name", text: name });
+      const sub = [kind === "movie" ? e.director : e.creators, e.genres].filter(Boolean).join(" · ");
+      if (sub) tdTitle.createDiv({ cls: "mg-list-sub", text: sub });
+      tr.createEl("td", { text: e.year || "" });
+      tr.createEl("td", { cls: "mg-list-num", text: e.rating ? String(e.rating) : "" });
+      tr.createEl("td", { cls: "mg-list-num", text: e.myRating ? String(e.myRating) : "" });
+      if (kind === "movie") tr.createEl("td", { text: e.runtime ? this.formatRuntime(e.runtime) : "" });
+      else {
+        const prog = getShowProgress(e);
+        tr.createEl("td", { text: [e.number_of_seasons ? `${prog.seasons}/${e.number_of_seasons} S` : "", e.number_of_episodes ? `${prog.episodes}/${e.number_of_episodes} Ep` : ""].filter(Boolean).join(" · ") });
+      }
+      const tdSt = tr.createEl("td");
+      tdSt.createSpan({ cls: `mg-list-status is-${st}`, text: (STATUS_OPTIONS.find((o) => o[0] === st) || [])[1] });
+      const tdFav = tr.createEl("td", { cls: "mg-list-fav" });
+      const heart = tdFav.createEl("button", { cls: "mg-list-heart" + (e.favorite ? " is-on" : ""), attr: { "aria-label": "Favourite" } });
+      heart.innerHTML = HEART_SVG;
+      heart.addEventListener("click", async (ev) => {
+        ev.stopPropagation();
+        e.favorite = !e.favorite;
+        heart.toggleClass("is-on", e.favorite);
+        await ctx.save(e);
+      });
+      tr.addEventListener("click", () => ctx.activate(e, tr));
+    });
+  }
+
+  // Click a name in the details: show only that person's titles.
+  filterByPerson(kind, name, role) {
+    const tab = kind === "movie" ? "movies" : "tv";
+    for (const el of [...this.galleryEls]) {
+      if (!document.body.contains(el) || el.__terroEmbed) continue;
+      el.__pendingPerson = { kind, person: { name, role } };
+      this.activeTabByEl.set(el, tab);
+      this.renderGallery(el);
+    }
+  }
+
+  applyPending(el, state, kind) {
+    const p = el.__pendingPerson;
+    if (p && p.kind === kind) {
+      state.person = p.person;
+      state.filter = "all";
+      state.search = "";
+      state.favOnly = false;
+      delete el.__pendingPerson;
+    }
+  }
+
+  appendPersonChip(countEl, state, rerender) {
+    if (!state.person) return;
+    const chip = countEl.createSpan({ cls: "mg-person-chip" });
+    chip.createSpan({ text: `${state.person.role === "cast" ? "Cast" : state.person.role === "creator" ? "Creator" : "Director"}: ${state.person.name}` });
+    const x = chip.createEl("button", { cls: "mg-person-chip-x", attr: { "aria-label": "Clear" } });
+    x.innerHTML = MG_ICONS.x;
+    x.addEventListener("click", () => {
+      state.person = null;
+      rerender();
+    });
+  }
+
+  // ---------------- Notes in your vault ----------------
+  notePathFor(entry, kind) {
+    const clean = (s) => String(s || "").replace(/[\\/:*?"<>|#^\[\]]/g, "").replace(/\s+/g, " ").trim();
+    const title = kind === "movie" ? entry.title : entry.name;
+    const name = `${clean(title)}${entry.year ? ` (${entry.year})` : ""}`.trim() || `Title ${entry.id}`;
+    const folder = (this.settings.notesFolder || "TerroTrack Notes").replace(/^\/+|\/+$/g, "");
+    return `${folder}/${name}.md`;
+  }
+
+  noteProps(entry, kind) {
+    const st = statusOf(entry);
+    const names = (t) => splitNames(t);
+    const base = {
+      terro: kind === "movie" ? "movie" : "tv",
+      title: kind === "movie" ? entry.title : entry.name,
+      year: entry.year ? Number(entry.year) || entry.year : undefined,
+      status: st === "unwatched" ? "to-watch" : st === "dropped" ? "trashed" : st,
+      favorite: !!entry.favorite,
+      rating: entry.rating ? Number(entry.rating) : undefined,
+      my_rating: entry.myRating ? Number(entry.myRating) : undefined,
+      genres: names(entry.genres),
+      language: entry.original_language || undefined,
+      watched_date: entry.watchedDate || undefined,
+      tmdb_id: /^\d+$/.test(String(entry.id)) ? Number(entry.id) : undefined,
+      poster: entry.poster_path ? `https://image.tmdb.org/t/p/w500${entry.poster_path}` : undefined,
+      cast: names(entry.cast).slice(0, 12),
+    };
+    if (kind === "movie") {
+      base.director = names(entry.director);
+      base.runtime = entry.runtime || undefined;
+    } else {
+      base.creators = names(entry.creators);
+      base.seasons = entry.number_of_seasons || undefined;
+      base.episodes = entry.number_of_episodes || undefined;
+      base.seasons_watched = getShowProgress(entry).seasons || undefined;
+      base.episodes_watched = getShowProgress(entry).episodes || undefined;
+      base.series_status = entry.show_status || undefined;
+    }
+    return base;
+  }
+
+  // Only the managed properties are written; the note text is never touched.
+  async syncTitleNote(entry, kind, force) {
+    try {
+      if (!force && this.settings.syncNoteProps === false) return;
+      const file = this.app.vault.getAbstractFileByPath(this.notePathFor(entry, kind));
+      if (!file || file.extension !== "md") return;
+      const props = this.noteProps(entry, kind);
+      await this.app.fileManager.processFrontMatter(file, (fm) => {
+        Object.entries(props).forEach(([k, v]) => {
+          if (v === undefined || v === "" || (Array.isArray(v) && !v.length)) delete fm[k];
+          else fm[k] = v;
+        });
+      });
+    } catch (e) {
+      console.error("TerroTrack: could not update note properties", e);
+    }
+  }
+
+  async openTitleNote(entry, kind) {
+    const path = this.notePathFor(entry, kind);
+    let file = this.app.vault.getAbstractFileByPath(path);
+    if (!file) {
+      const folder = path.slice(0, path.lastIndexOf("/"));
+      if (!this.app.vault.getAbstractFileByPath(folder)) {
+        try {
+          await this.app.vault.createFolder(folder);
+        } catch (e) {
+          /* already there */
+        }
+      }
+      const title = kind === "movie" ? entry.title : entry.name;
+      const body = [`# ${title}${entry.year ? ` (${entry.year})` : ""}`, "", entry.overview ? `> ${entry.overview}` : "", "", "## Notes", "", entry.notes || "", ""].join("\n");
+      file = await this.app.vault.create(path, body);
+      await this.syncTitleNote(entry, kind, true);
+    }
+    await this.app.workspace.getLeaf(false).openFile(file);
+  }
+
+  // ---------------- Filtered embeds ----------------
+  async renderEmbed(el) {
+    const p = el.__terroEmbed;
+    el.empty();
+    el.addClass("movie-gallery-block");
+    el.addClass("mg-embed");
+
+    const want = (p.type || "movies").toLowerCase();
+    const kinds = want === "all" || want === "both" ? ["movie", "tv"] : want.startsWith("tv") || want === "show" || want === "shows" ? ["tv"] : ["movie"];
+    let items = [];
+    if (kinds.includes("movie")) items = items.concat((await this.readMovies()).map((e) => ({ e, k: "movie" })));
+    if (kinds.includes("tv")) items = items.concat((await this.readShows()).map((e) => ({ e, k: "tv" })));
+
+    const truthy = (v) => /^(1|true|yes|on)$/i.test(String(v || ""));
+    const status = String(p.status || "").toLowerCase().replace(/[\s_-]+/g, "");
+    const statusMap = { towatch: "unwatched", unwatched: "unwatched", planned: "unwatched", watching: "watching", watched: "watched", done: "watched", trashed: "dropped", dropped: "dropped" };
+    const genres = splitNames(p.genre || p.genres).map((g) => g.toLowerCase());
+    const people = p.person || p.director || p.creator || p.cast || "";
+    const years = (() => {
+      const y = String(p.year || "").trim();
+      if (!y) return null;
+      const range = y.match(/^(\d{4})\s*[-–]\s*(\d{4})$/);
+      if (range) return { from: +range[1], to: +range[2] };
+      const list = y.split(",").map((n) => +n.trim()).filter(Boolean);
+      return { list };
+    })();
+    const col = p.collection ? (this.collections || []).find((c) => c.name.toLowerCase() === String(p.collection).toLowerCase()) : null;
+    const minRating = parseFloat(p.min_rating || p.rating || "") || 0;
+    const minMine = parseFloat(p.min_my_rating || "") || 0;
+    const q = String(p.search || "").toLowerCase();
+
+    let out = items.filter(({ e, k }) => {
+      if (status && status !== "all" && statusMap[status] && statusOf(e) !== statusMap[status]) return false;
+      if ((p.favorite !== undefined || p.favourite !== undefined) && truthy(p.favorite ?? p.favourite) && !e.favorite) return false;
+      if (genres.length && !splitNames(e.genres).some((g) => genres.includes(g.toLowerCase()))) return false;
+      if (years) {
+        const y = parseInt(e.year, 10);
+        if (years.list ? !years.list.includes(y) : !(y >= years.from && y <= years.to)) return false;
+      }
+      if (p.language || p.lang) {
+        if (this.normalizeLanguageCode(e.original_language) !== String(p.language || p.lang).toLowerCase()) return false;
+      }
+      if (p.collection && (!col || !this.collectionHas(col, k, e.id))) return false;
+      if (people) {
+        const n = people.toLowerCase();
+        const hit = [e.director, e.creators, e.cast].some((f) => splitNames(f).some((x) => x.toLowerCase() === n));
+        if (!hit) return false;
+      }
+      if (minRating && !(parseFloat(e.rating) >= minRating)) return false;
+      if (minMine && !(parseFloat(e.myRating) >= minMine)) return false;
+      if (q && !String((k === "movie" ? e.title : e.name) || "").toLowerCase().includes(q)) return false;
+      return true;
+    });
+
+    const sort = String(p.sort || "added").toLowerCase().replace(/[\s_-]/g, "");
+    const dir = String(p.dir || p.order || (sort === "title" ? "asc" : "desc")).toLowerCase() === "asc" ? 1 : -1;
+    const nameOf = ({ e, k }) => (k === "movie" ? e.title : e.name) || "";
+    const num = (v) => parseFloat(v) || 0;
+    const lenOf = ({ e, k }) => (k === "movie" ? e.runtime : e.episode_runtime) || 0;
+    if (sort !== "added") {
+      out = out
+        .map((x, i) => ({ x, i }))
+        .sort((a, b) => {
+          let c = 0;
+          if (sort === "title") c = nameOf(a.x).localeCompare(nameOf(b.x));
+          else if (sort === "year") c = num(a.x.e.year) - num(b.x.e.year);
+          else if (sort === "rating") c = num(a.x.e.rating) - num(b.x.e.rating);
+          else if (sort === "myrating") c = num(a.x.e.myRating) - num(b.x.e.myRating);
+          else if (sort === "runtime") c = lenOf(a.x) - lenOf(b.x);
+          return c ? c * dir : a.i - b.i;
+        })
+        .map((o) => o.x);
+    } else if (dir === -1) out = out.slice().reverse(); // newest added first
+    const limit = parseInt(p.limit, 10) || 0;
+    const total = out.length;
+    if (limit) out = out.slice(0, limit);
+
+    const head = el.createDiv({ cls: "mg-embed-head" });
+    const autoTitle = [status && status !== "all" ? (statusMap[status] ? (STATUS_OPTIONS.find((o) => o[0] === statusMap[status]) || [])[1] : "") : "", truthy(p.favorite ?? p.favourite) ? "Favourites" : "", p.collection || "", genres.length ? splitNames(p.genre || p.genres).join(" / ") : "", p.year || ""].filter(Boolean).join(" · ");
+    head.createDiv({ cls: "mg-embed-title", text: p.title || autoTitle || (kinds.length === 2 ? "Library" : kinds[0] === "movie" ? "Movies" : "TV Shows") });
+    head.createDiv({ cls: "mg-embed-count", text: limit && total > limit ? `${out.length} of ${total}` : `${total} title${total === 1 ? "" : "s"}` });
+
+    if (!out.length) {
+      el.createDiv({ cls: "movie-gallery-empty", text: "Nothing matches this filter yet." });
+      return;
+    }
+    const openDetails = ({ e, k }) => (k === "movie" ? new MovieDetailModal(this.app, this, e) : new TvDetailModal(this.app, this, e)).open();
+
+    if (String(p.view || "grid").toLowerCase() === "list") {
+      const st = { selected: new Set(), selecting: false, sortField: "", sortDir: "desc" };
+      out.forEach((x) => {
+        const sub = el.createDiv({ cls: "mg-embed-list-wrap" });
+        this.renderListView(sub, [x.e], x.k, st, { rerenderSection: () => {}, activate: () => openDetails(x), save: (e) => (x.k === "movie" ? this.updateMovie(e) : this.updateShow(e)) });
+      });
+      return;
+    }
+    const grid = el.createDiv({ cls: "movie-gallery-grid mg-embed-grid" });
+    const sizes = { small: 96, medium: 120, large: 160 };
+    const px = sizes[String(p.size || "medium").toLowerCase()] || 120;
+    grid.style.gridTemplateColumns = p.columns ? `repeat(${parseInt(p.columns, 10) || 6}, 1fr)` : `repeat(auto-fill, minmax(${px}px, 1fr))`;
+    out.forEach((x) => {
+      const { e, k } = x;
+      const card = grid.createDiv({ cls: "movie-gallery-card" + ` status-${statusOf(e)}` });
+      const wrap = card.createDiv({ cls: "movie-gallery-poster-wrap" });
+      const url = getPosterUrl(e);
+      wrap.createEl("img", { attr: { src: url, alt: nameOf(x), loading: "lazy" } });
+      if (e.rating) wrap.createSpan({ cls: "movie-gallery-poster-badge movie-gallery-poster-badge-rating", text: `★ ${e.rating}` });
+      const st = statusOf(e);
+      if (st !== "unwatched") wrap.createSpan({ cls: `movie-gallery-poster-badge movie-gallery-poster-badge-${st}`, text: STATUS_BADGE[st] });
+      if (!truthy(p.notitles)) card.createDiv({ cls: "movie-gallery-title", text: nameOf(x) });
+      card.addEventListener("click", () => openDetails(x));
+    });
+  }
+
+  // ---------------- Collections tab ----------------
+  async renderCollectionsSection(el, stateKey) {
+    this.collectionStates = this.collectionStates || new Map();
+    let state = this.collectionStates.get(stateKey);
+    if (!state) {
+      state = { open: null };
+      this.collectionStates.set(stateKey, state);
+    }
+    const cols = this.collections || [];
+    if (state.open && !cols.find((c) => c.id === state.open)) state.open = null;
+
+    const headerWrap = el.createDiv({ cls: "movie-gallery-header-wrap" });
+    const headerTop = headerWrap.createDiv({ cls: "movie-gallery-header-top" });
+    headerTop.createDiv({ cls: "movie-gallery-heading", text: "📚 Collections" });
+    this.buildTabBar(headerTop, stateKey, "collections");
+
+    const movies = await this.readMovies();
+    const shows = await this.readShows();
+    const lookup = new Map();
+    movies.forEach((m) => lookup.set(`movie:${m.id}`, { e: m, k: "movie" }));
+    shows.forEach((s) => lookup.set(`tv:${s.id}`, { e: s, k: "tv" }));
+    const resolve = (c) => c.items.map((x) => lookup.get(`${x.t}:${x.id}`)).filter(Boolean);
+    const rerender = () => this.renderGallery(stateKey);
+
+    const bar = headerWrap.createDiv({ cls: "mg-col-bar" });
+    const body = el.createDiv({ cls: "mg-col-body" });
+    const nameOf = ({ e, k }) => (k === "movie" ? e.title : e.name);
+    const openDetails = ({ e, k }) => (k === "movie" ? new MovieDetailModal(this.app, this, e) : new TvDetailModal(this.app, this, e)).open();
+
+    if (!state.open) {
+      bar.createDiv({ cls: "mg-col-hint", text: cols.length ? `${cols.length} collection${cols.length === 1 ? "" : "s"}` : "Group movies and shows into your own lists." });
+      const add = makeAddButton(bar, "New collection");
+      add.addEventListener("click", () => new PromptModal(this.app, { title: "New collection", placeholder: "e.g. Horror night", cta: "Create", onSubmit: (name) => this.createCollection(name) }).open());
+
+      if (!cols.length) {
+        const empty = body.createDiv({ cls: "mg-col-empty" });
+        empty.createDiv({ cls: "mg-col-empty-title", text: "No collections yet" });
+        empty.createDiv({ cls: "mg-col-empty-sub", text: "Create one here, then add titles from a title's details (Collection button) or select several posters and use Collection in the bar." });
+        return;
+      }
+      const grid = body.createDiv({ cls: "mg-col-grid" });
+      cols.forEach((c) => {
+        const items = resolve(c);
+        const card = grid.createDiv({ cls: "mg-col-card", attr: { tabindex: "0", role: "button" } });
+        const cover = card.createDiv({ cls: "mg-col-cover" });
+        for (let i = 0; i < 4; i++) {
+          const tile = cover.createDiv({ cls: "mg-col-tile" });
+          const it = items[i];
+          const url = it ? getPosterUrl(it.e) : "";
+          if (url) tile.createEl("img", { attr: { src: url, alt: "", loading: "lazy" } });
+        }
+        card.createDiv({ cls: "mg-col-name", text: c.name });
+        card.createDiv({ cls: "mg-col-count", text: `${items.length} title${items.length === 1 ? "" : "s"}` });
+        const open = () => {
+          state.open = c.id;
+          rerender();
+        };
+        card.addEventListener("click", open);
+        card.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") open();
+        });
+      });
+      return;
+    }
+
+    const c = cols.find((x) => x.id === state.open);
+    const items = resolve(c);
+    const back = bar.createEl("button", { cls: "mg-col-back" });
+    back.innerHTML = `${MG_ICONS.back}<span>All collections</span>`;
+    back.addEventListener("click", () => {
+      state.open = null;
+      rerender();
+    });
+    bar.createDiv({ cls: "mg-col-title", text: c.name });
+    bar.createDiv({ cls: "mg-col-hint", text: `${items.length} title${items.length === 1 ? "" : "s"}` });
+    const rename = bar.createEl("button", { cls: "mg-bulk-btn", text: "Rename" });
+    rename.addEventListener("click", () => new PromptModal(this.app, { title: "Rename collection", value: c.name, cta: "Save", onSubmit: (name) => this.renameCollection(c.id, name) }).open());
+    const del = bar.createEl("button", { cls: "mg-bulk-btn is-danger", text: "Delete" });
+    del.addEventListener("click", async () => {
+      if (!confirm(`Delete the collection "${c.name}"? The titles stay in your library.`)) return;
+      state.open = null;
+      await this.deleteCollection(c.id);
+    });
+
+    if (!items.length) {
+      body.createDiv({ cls: "mg-col-empty-sub", text: "This collection is empty. Open a title and use Collection, or select posters in the Movies or TV tab." });
+      return;
+    }
+    const grid = body.createDiv({ cls: "movie-gallery-grid" });
+    grid.style.gridTemplateColumns = `repeat(auto-fill, minmax(${CARD_SIZE_PX_COLLECTION}px, 1fr))`;
+    items.forEach((x) => {
+      const { e, k } = x;
+      const card = grid.createDiv({ cls: "movie-gallery-card" + ` status-${statusOf(e)}` });
+      const wrap = card.createDiv({ cls: "movie-gallery-poster-wrap" });
+      wrap.createEl("img", { attr: { src: getPosterUrl(e), alt: nameOf(x), loading: "lazy" } });
+      wrap.createSpan({ cls: "mg-col-kind", text: k === "movie" ? "Movie" : "TV" });
+      const st = statusOf(e);
+      if (st !== "unwatched") wrap.createSpan({ cls: `movie-gallery-poster-badge movie-gallery-poster-badge-${st}`, text: STATUS_BADGE[st] });
+      const rm = wrap.createEl("button", { cls: "mg-col-remove", attr: { "aria-label": "Remove from collection", title: "Remove from collection" } });
+      rm.innerHTML = MG_ICONS.x;
+      rm.addEventListener("click", async (ev) => {
+        ev.stopPropagation();
+        await this.setInCollection(c.id, [{ t: k, id: e.id }], false);
+      });
+      card.createDiv({ cls: "movie-gallery-title", text: nameOf(x) });
+      card.addEventListener("click", () => openDetails(x));
+    });
+  }
+
+  // ---------------- "This week": new episodes and releases for titles in your library ----------------
+  async tmdbJson(path, ttlMs) {
+    this._jsonCache = this._jsonCache || new Map();
+    const hit = this._jsonCache.get(path);
+    if (hit && Date.now() - hit.t < ttlMs) return hit.data;
+    const url = `https://api.themoviedb.org/3${path}?` + new URLSearchParams({ api_key: this.settings.tmdbApiKey, language: "en-US" }).toString();
+    const res = await requestUrl({ url });
+    this._jsonCache.set(path, { t: Date.now(), data: res.json });
+    return res.json;
+  }
+
+  // Last aired / next airing episode of a show, plus how many episodes each season has.
+  async tvAirInfo(show) {
+    if (!this.settings.tmdbApiKey || !/^\d+$/.test(String(show.id))) return null;
+    try {
+      const d = await this.tmdbJson(`/tv/${show.id}`, 6 * 60 * 60 * 1000);
+      const ep = (x) => (x && x.air_date ? { air: x.air_date, s: x.season_number, e: x.episode_number, name: x.name || "" } : null);
+      return {
+        last: ep(d.last_episode_to_air),
+        next: ep(d.next_episode_to_air),
+        seasons: (d.seasons || []).filter((x) => x.season_number > 0).map((x) => ({ n: x.season_number, count: x.episode_count || 0 })),
+      };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Everything in your library that needs attention within a week either side of today.
+  async thisWeekItems() {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const key = (d) => localDateKey(d);
+    const todayKey = key(today);
+    const fromKey = key(addDays(today, -7));
+    const toKey = key(addDays(today, 7));
+    const inWindow = (d) => !!d && d >= fromKey && d <= toKey;
+
+    const movies = await this.readMovies();
+    const shows = await this.readShows();
+    const items = [];
+
+    // Movies still on To Watch: refresh dates that are near, so a delayed release isn't missed
+    this._relDates = this._relDates || new Map();
+    const soon = key(addDays(today, 30));
+    const near = movies.filter((m) => statusOf(m) === "unwatched" && /^\d+$/.test(String(m.id)) && m.release_date && m.release_date >= fromKey && m.release_date <= soon);
+    if (this.settings.tmdbApiKey) {
+      await Promise.all(
+        near.map(async (m) => {
+          try {
+            const d = await this.tmdbJson(`/movie/${m.id}`, 12 * 60 * 60 * 1000);
+            if (d && d.release_date) this._relDates.set(m.id, d.release_date);
+          } catch (e) {
+            /* keep the saved date */
+          }
+        })
+      );
+    }
+    movies.forEach((m) => {
+      if (statusOf(m) !== "unwatched") return;
+      const date = this._relDates.get(m.id) || m.release_date;
+      if (inWindow(date)) items.push({ group: "release", kind: "movie", e: m, date });
+    });
+    shows.forEach((s) => {
+      if (statusOf(s) === "unwatched" && inWindow(s.first_air_date)) items.push({ group: "release", kind: "tv", e: s, date: s.first_air_date, premiere: true });
+    });
+
+    // Shows you're watching: episodes you haven't seen yet, and ones about to air
+    const watching = shows.filter((s) => statusOf(s) === "watching");
+    const infos = await Promise.all(watching.map((s) => this.tvAirInfo(s)));
+    watching.forEach((s, i) => {
+      const info = infos[i];
+      if (!info) return;
+      const absIndex = (ep) => info.seasons.filter((x) => x.n < ep.s).reduce((n, x) => n + x.count, 0) + ep.e;
+      if (info.last && inWindow(info.last.air) && info.last.air <= todayKey) {
+        const behind = absIndex(info.last) - (s.episodesWatched || 0);
+        if (behind > 0) items.push({ group: "episode", kind: "tv", e: s, date: info.last.air, ep: info.last, behind });
+      }
+      if (info.next && info.next.air >= todayKey && inWindow(info.next.air)) items.push({ group: "episode", kind: "tv", e: s, date: info.next.air, ep: info.next, upcoming: true });
+    });
+
+    items.forEach((it) => (it.out = it.date <= todayKey && (it.group === "release" || it.behind > 0)));
+    return { items, todayKey };
+  }
+
+  async addEpisode(s) {
+    const total = s.number_of_episodes || 0;
+    const before = s.episodesWatched || 0;
+    if (total && before >= total) return;
+    s.episodesWatched = before + 1;
+    syncShowProgress(s, "episodes");
+    this.logActivity("tv", 1);
+    const doneEps = total && s.episodesWatched >= total;
+    const doneSeasons = s.number_of_seasons && (s.seasonsWatched || 0) >= s.number_of_seasons;
+    if (doneEps || doneSeasons) setStatus(s, "watched");
+    else if (statusOf(s) === "unwatched") setStatus(s, "watching");
+    await this.updateShow(s);
+  }
+
+  buildWeekButton(group) {
+    const btn = group.createEl("button", {
+      cls: "movie-gallery-group-btn mg-week-btn",
+      attr: { "aria-label": "This week", title: "This week: new episodes and releases in your library" },
+    });
+    btn.innerHTML = MG_ICONS.bell;
+    const badge = btn.createSpan({ cls: "mg-week-badge is-hidden" });
+    btn.addEventListener("click", () => this.openWeekPanel(btn));
+    // fill in the count without blocking the toolbar
+    this.thisWeekItems()
+      .then(({ items }) => {
+        if (!btn.isConnected) return;
+        const n = items.filter((x) => x.out).length;
+        badge.setText(String(n));
+        badge.toggleClass("is-hidden", n === 0);
+      })
+      .catch(() => {});
+  }
+
+  async openWeekPanel(anchor) {
+    if (this._weekPanel) {
+      this._weekPanel.close();
+      return;
+    }
+    const panel = document.body.createDiv({ cls: "mg-week-pop", attr: { role: "dialog", "aria-label": "This week" } });
+    const scope = new Scope();
+    let open = true;
+    const close = () => {
+      if (!open) return;
+      open = false;
+      this.app.keymap.popScope(scope);
+      document.removeEventListener("mousedown", onDown, true);
+      window.removeEventListener("resize", close);
+      panel.remove();
+      this._weekPanel = null;
+    };
+    const onDown = (e) => {
+      if (!panel.contains(e.target) && !anchor.contains(e.target)) close();
+    };
+    scope.register([], "Escape", () => {
+      close();
+      return false;
+    });
+    this.app.keymap.pushScope(scope);
+    document.addEventListener("mousedown", onDown, true);
+    window.addEventListener("resize", close);
+    this._weekPanel = { close };
+
+    const place = () => {
+      if (!anchor.isConnected) return; // the gallery re-rendered: keep where the panel is
+      const r = anchor.getBoundingClientRect();
+      const w = Math.min(430, window.innerWidth - 16);
+      panel.style.width = `${w}px`;
+      panel.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - w - 8))}px`;
+      panel.style.top = `${r.bottom + 8}px`;
+      panel.style.maxHeight = `${Math.max(220, window.innerHeight - r.bottom - 24)}px`;
+    };
+    place();
+    panel.createDiv({ cls: "mg-week-loading", text: "Checking your library…" });
+
+    const build = async () => {
+    const { items, todayKey } = await this.thisWeekItems();
+    if (!open) return;
+    panel.empty();
+
+    const head = panel.createDiv({ cls: "mg-week-head" });
+    head.createDiv({ cls: "mg-week-title", text: "This week" });
+    const from = addDays(new Date(), -7);
+    const to = addDays(new Date(), 7);
+    head.createDiv({ cls: "mg-week-sub", text: `${formatShortDate(localDateKey(from))} – ${formatShortDate(localDateKey(to))}` });
+
+    const today = parseDateKey(todayKey);
+    const when = (dateKey, aired) => {
+      const d = Math.round((parseDateKey(dateKey) - today) / 86400000);
+      if (d === 0) return ["Today", "is-today"];
+      if (d === 1) return ["Tomorrow", "is-soon"];
+      if (d === -1) return ["Yesterday", "is-out"];
+      const dd = parseDateKey(dateKey);
+      const label = `${HM_DAYS[dd.getDay()]}, ${HM_MONTHS[dd.getMonth()]} ${dd.getDate()}`;
+      return d < 0 ? [`${aired ? "Aired" : "Out"} ${HM_DAYS[dd.getDay()]}`, "is-out"] : [label, "is-soon"];
+    };
+
+    const hasKey = !!this.settings.tmdbApiKey;
+    const groups = [
+      ["New episodes", items.filter((x) => x.group === "episode").sort((a, b) => (a.upcoming === b.upcoming ? (a.upcoming ? a.date.localeCompare(b.date) : b.date.localeCompare(a.date)) : a.upcoming ? 1 : -1))],
+      ["Releases from your To Watch", items.filter((x) => x.group === "release").sort((a, b) => a.date.localeCompare(b.date))],
+    ];
+    let any = false;
+    groups.forEach(([label, list]) => {
+      if (!list.length) return;
+      any = true;
+      const g = panel.createDiv({ cls: "mg-week-grp" });
+      g.createSpan({ text: label });
+      g.createEl("i", { text: String(list.length) });
+      list.forEach((it) => {
+        const e = it.e;
+        const name = it.kind === "movie" ? e.title : e.name;
+        const row = panel.createDiv({ cls: "mg-week-item", attr: { tabindex: "0", role: "button" } });
+        const url = getPosterUrl(e);
+        if (url) row.createEl("img", { attr: { src: url, alt: "", loading: "lazy" } });
+        const main = row.createDiv({ cls: "mg-week-main" });
+        main.createDiv({ cls: "mg-week-name", text: name });
+        let sub;
+        if (it.group === "episode") {
+          sub = `S${it.ep.s} · E${it.ep.e}${it.ep.name ? ` “${it.ep.name}”` : ""}`;
+          if (it.behind > 1) sub += ` · ${it.behind} episodes behind`;
+        } else sub = it.kind === "movie" ? "Movie release" : "Series premiere";
+        main.createDiv({ cls: "mg-week-subline", text: sub });
+        const [txt, cls] = when(it.date, it.group === "episode");
+        row.createSpan({ cls: `mg-week-when ${cls}`, text: txt });
+        if (it.group === "episode" && !it.upcoming) {
+          const step = row.createEl("button", { cls: "mg-week-step", text: "+1 ep", attr: { title: "Mark one more episode watched" } });
+          step.addEventListener("click", async (ev) => {
+            ev.stopPropagation();
+            step.disabled = true;
+            await this.addEpisode(e);
+            await build(); // refresh the list in place
+          });
+        }
+        const openIt = () => {
+          close();
+          (it.kind === "movie" ? new MovieDetailModal(this.app, this, e) : new TvDetailModal(this.app, this, e)).open();
+        };
+        row.addEventListener("click", openIt);
+        row.addEventListener("keydown", (ev) => {
+          if (ev.key === "Enter") openIt();
+        });
+      });
+    });
+    if (!any) panel.createDiv({ cls: "mg-week-empty", text: "Nothing new this week for the titles in your library." });
+    if (!hasKey) panel.createDiv({ cls: "mg-week-note", text: "Add your TMDB key in settings to see new episodes of shows you're watching." });
+    place();
+    };
+    await build();
+  }
+
   buildTabBar(parent, stateKey, active) {
     const counts = this._tabCounts || {};
     const icons = {
       movies: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18M3 8h4M3 12h4M3 16h4M17 8h4M17 12h4M17 16h4"/></svg>',
       tv: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="m17 2-5 5-5-5"/></svg>',
       discover: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m16.24 7.76-2.12 6.36-6.36 2.12 2.12-6.36z"/></svg>',
+      collections: MG_ICONS.layers.replace(/width="16" height="16"/, 'width="16" height="16"'),
     };
     const bar = parent.createDiv({ cls: "mg-tabs", attr: { role: "tablist" } });
-    [["movies", "Movies"], ["tv", "TV Shows"], ["discover", "Discover"]].forEach(([key, label]) => {
+    [["movies", "Movies"], ["tv", "TV Shows"], ["collections", "Collections"], ["discover", "Discover"]].forEach(([key, label]) => {
       const b = bar.createEl("button", {
         cls: "mg-tab" + (key === active ? " active" : ""),
         attr: { role: "tab", "aria-selected": String(key === active) },
@@ -3053,14 +4259,18 @@ class MovieGalleryPlugin extends Plugin {
     if (!this.activeTabByEl) this.activeTabByEl = new Map();
     const activeTab = this.activeTabByEl.get(el) || "movies";
 
+    if (el.__terroEmbed) return this.renderEmbed(el);
+
     el.empty();
     el.addClass("movie-gallery-block");
 
     const sectionEl = el.createDiv();
 
-    this._tabCounts = { movies: (await this.readMovies()).length, tv: (await this.readShows()).length };
+    this._tabCounts = { movies: (await this.readMovies()).length, tv: (await this.readShows()).length, collections: (this.collections || []).length };
 
-    if (activeTab === "discover") {
+    if (activeTab === "collections") {
+      await this.renderCollectionsSection(sectionEl, el);
+    } else if (activeTab === "discover") {
       await this.renderDiscoverSection(sectionEl, el);
     } else if (activeTab === "tv") {
       await this.renderTvSection(sectionEl, el);
@@ -3076,10 +4286,12 @@ class MovieGalleryPlugin extends Plugin {
         search: "", filter: "all", genres: [], languages: [],
         years: [], sortField: "added", sortDir: "desc",
         ratings: [], myRatings: [],
+        view: this.settings.moviesView || "grid", selecting: false, selected: new Set(), person: null,
       };
       this.galleryStates.set(stateKey, state);
     }
 
+    this.applyPending(stateKey, state, "movie");
     el.empty();
     el.addClass("movie-gallery-block");
 
@@ -3149,6 +4361,7 @@ class MovieGalleryPlugin extends Plugin {
       ["title", "Title"],
       ["year", "Year"],
       ["rating", "Rating"],
+      ["myrating", "My rating"],
       ["runtime", "Runtime"],
     ];
 
@@ -3211,8 +4424,15 @@ class MovieGalleryPlugin extends Plugin {
     });
 
     // ---- Grouped: filter | stats | settings ----
+    this.buildViewTools(leftCluster, state, "movie", {
+      rerenderSection: () => this.renderMovieSection(el, stateKey),
+      getAll: () => allMovies,
+      openDetails: (m) => new MovieDetailModal(this.app, this, m).open(),
+    });
+
     const toolsGroup = leftCluster.createDiv({ cls: "movie-gallery-view-group" });
 
+    this.buildWeekButton(toolsGroup);
     this.buildFavToggle(toolsGroup, state, allMovies, () => this.renderMovieSection(el, stateKey));
 
     const filterBtn = toolsGroup.createEl("button", {
@@ -3260,6 +4480,22 @@ class MovieGalleryPlugin extends Plugin {
 
     const countEl = el.createDiv({ cls: "movie-gallery-count" });
     const grid = el.createDiv({ cls: "movie-gallery-grid" });
+    this.buildBulkBar(el, state, "movie", {
+      getVisible: () => this.filterAndSort(allMovies, state),
+      getAll: () => allMovies,
+      rerenderGrid: (p) => renderGrid(p),
+      rerenderSection: () => this.renderMovieSection(el, stateKey),
+    });
+
+    const toggleSel = (m, node) => {
+      if (state.selected.has(m.id)) state.selected.delete(m.id);
+      else state.selected.add(m.id);
+      const on = state.selected.has(m.id);
+      node.toggleClass("is-selected", on);
+      const box = node.querySelector(".mg-sel-box");
+      if (box) box.toggleClass("is-on", on);
+      if (state._bulkUpdate) state._bulkUpdate();
+    };
 
     const CARD_SIZE_PX = { small: 110, medium: 140, large: 180 };
     if (this.settings.cardsPerRow && this.settings.cardsPerRow !== "auto") {
@@ -3273,8 +4509,10 @@ class MovieGalleryPlugin extends Plugin {
     const renderGrid = (preserveCount) => {
       if (!preserveCount) movieVisibleCount = 60;
       grid.empty();
+      grid.toggleClass("is-list", state.view === "list");
       const movies = this.filterAndSort(allMovies, state);
       countEl.setText(`${movies.length} of ${allMovies.length} movie${allMovies.length === 1 ? "" : "s"}`);
+      this.appendPersonChip(countEl, state, () => renderGrid());
 
       if (!allMovies.length) {
         grid.createDiv({ cls: "movie-gallery-empty", text: "No movies yet. Click \"+ Add Movie\" to search TMDB." });
@@ -3288,9 +4526,18 @@ class MovieGalleryPlugin extends Plugin {
       const f = this.settings.cardFields;
       const visibleMovies = movies.slice(0, movieVisibleCount);
 
-      for (const m of visibleMovies) {
-        const card = grid.createDiv({ cls: "movie-gallery-card" + (m.watched ? " watched" : "") + ` status-${statusOf(m)}` });
+      if (state.view === "list") {
+        this.renderListView(grid, visibleMovies, "movie", state, {
+          rerenderSection: () => this.renderMovieSection(el, stateKey),
+          activate: (m, tr) => (state.selecting ? toggleSel(m, tr) : new MovieDetailModal(this.app, this, m).open()),
+          save: (m) => this.updateMovie(m),
+        });
+      }
+
+      for (const m of state.view === "list" ? [] : visibleMovies) {
+        const card = grid.createDiv({ cls: "movie-gallery-card" + (m.watched ? " watched" : "") + ` status-${statusOf(m)}` + (state.selecting ? " is-selecting" : "") + (state.selected.has(m.id) ? " is-selected" : "") });
         const posterWrap = card.createDiv({ cls: "movie-gallery-poster-wrap" });
+        if (state.selecting) posterWrap.createDiv({ cls: "mg-sel-box" + (state.selected.has(m.id) ? " is-on" : "") }).innerHTML = MG_ICONS.check;
         const posterUrl = getPosterUrl(m);
         const posterImg = posterWrap.createEl("img", { attr: { src: posterUrl, alt: m.title, loading: "lazy" } });
 
@@ -3304,7 +4551,7 @@ class MovieGalleryPlugin extends Plugin {
         }
         if (f.favorite !== false) this.buildFavBadge(posterWrap, m, () => this.updateMovie(m));
 
-        const openModal = () => new MovieDetailModal(this.app, this, m).open();
+        const openModal = () => (state.selecting ? toggleSel(m, card) : new MovieDetailModal(this.app, this, m).open());
         posterImg.addEventListener("click", (e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -3324,13 +4571,8 @@ class MovieGalleryPlugin extends Plugin {
         if (f.myRating && m.myRating) metaLine(`Me: ${m.myRating}`);
         if (f.genres) metaLine(m.genres);
         if (f.director) metaLine(m.director);
-        if (f.cast) metaLine(m.cast);
-        if (f.release_date) metaLine(this.formatDate(m.release_date));
         if (f.runtime) metaLine(this.formatRuntime(m.runtime));
         if (f.language) metaLine(this.languageName(m.original_language));
-        if (f.budget) metaLine(this.formatBudget(m.budget));
-        if (f.overview && m.overview) card.createDiv({ cls: "movie-gallery-meta movie-gallery-overview-snippet", text: m.overview });
-        if (f.notes && m.notes) card.createDiv({ cls: "movie-gallery-meta movie-gallery-notes-snippet", text: m.notes });
 
         card.addEventListener("click", openModal);
       }
@@ -3360,10 +4602,12 @@ class MovieGalleryPlugin extends Plugin {
         search: "", filter: "all", genres: [], languages: [],
         years: [], sortField: "added", sortDir: "desc",
         ratings: [], myRatings: [], showStatuses: [],
+        view: this.settings.tvView || "grid", selecting: false, selected: new Set(), person: null,
       };
       this.tvGalleryStates.set(stateKey, state);
     }
 
+    this.applyPending(stateKey, state, "tv");
     el.empty();
     el.addClass("movie-gallery-block");
 
@@ -3430,6 +4674,7 @@ class MovieGalleryPlugin extends Plugin {
       ["title", "Title"],
       ["year", "Year"],
       ["rating", "Rating"],
+      ["myrating", "My rating"],
       ["runtime", "Runtime"],
     ];
 
@@ -3509,8 +4754,15 @@ class MovieGalleryPlugin extends Plugin {
     });
 
     // ---- Grouped: filter | stats | settings ----
+    this.buildViewTools(leftCluster, state, "tv", {
+      rerenderSection: () => this.renderTvSection(el, stateKey),
+      getAll: () => allShows,
+      openDetails: (s) => new TvDetailModal(this.app, this, s).open(),
+    });
+
     const toolsGroup = leftCluster.createDiv({ cls: "movie-gallery-view-group" });
 
+    this.buildWeekButton(toolsGroup);
     this.buildFavToggle(toolsGroup, state, allShows, () => this.renderTvSection(el, stateKey));
 
     const filterBtn = toolsGroup.createEl("button", {
@@ -3558,6 +4810,22 @@ class MovieGalleryPlugin extends Plugin {
 
     const countEl = el.createDiv({ cls: "movie-gallery-count" });
     const grid = el.createDiv({ cls: "movie-gallery-grid" });
+    this.buildBulkBar(el, state, "tv", {
+      getVisible: () => allShows.filter(matchesShow),
+      getAll: () => allShows,
+      rerenderGrid: (p) => renderGrid(p),
+      rerenderSection: () => this.renderTvSection(el, stateKey),
+    });
+
+    const toggleSel = (s, node) => {
+      if (state.selected.has(s.id)) state.selected.delete(s.id);
+      else state.selected.add(s.id);
+      const on = state.selected.has(s.id);
+      node.toggleClass("is-selected", on);
+      const box = node.querySelector(".mg-sel-box");
+      if (box) box.toggleClass("is-on", on);
+      if (state._bulkUpdate) state._bulkUpdate();
+    };
 
     const CARD_SIZE_PX = { small: 110, medium: 140, large: 180 };
     if (this.settings.tvCardsPerRow && this.settings.tvCardsPerRow !== "auto") {
@@ -3589,13 +4857,15 @@ class MovieGalleryPlugin extends Plugin {
         (s.myRating !== "" && s.myRating != null && state.myRatings.includes(parseInt(s.myRating, 10)));
       const matchesSeries =
         !(state.showStatuses || []).length || state.showStatuses.includes(normalizeSeriesStatus(s.show_status));
-      return matchesSearch && matchesFilter && matchesGenre && matchesLanguage && matchesYear && matchesRating && matchesMyRating && matchesSeries && (!state.favOnly || !!s.favorite);
+      return matchesSearch && matchesFilter && matchesGenre && matchesLanguage && matchesYear && matchesRating && matchesMyRating && matchesSeries && (!state.favOnly || !!s.favorite) &&
+        personMatches(s, state.person, "tv");
     };
 
     let tvVisibleCount = 60;
     const renderGrid = (preserveCount) => {
       if (!preserveCount) tvVisibleCount = 60;
       grid.empty();
+      grid.toggleClass("is-list", state.view === "list");
       const q = state.search.trim().toLowerCase();
       let shows = allShows.filter(matchesShow);
 
@@ -3604,6 +4874,7 @@ class MovieGalleryPlugin extends Plugin {
         case "title": shows.sort((a, b) => a.name.localeCompare(b.name) * dir); break;
         case "year": shows.sort((a, b) => (a.year || "").localeCompare(b.year || "") * dir); break;
         case "rating": shows.sort((a, b) => (parseFloat(a.rating || 0) - parseFloat(b.rating || 0)) * dir); break;
+        case "myrating": shows.sort(byMyRating(dir)); break;
         case "runtime": shows.sort((a, b) => ((a.episode_runtime || 0) - (b.episode_runtime || 0)) * dir); break;
         case "added":
         default:
@@ -3613,6 +4884,7 @@ class MovieGalleryPlugin extends Plugin {
       if (q) shows = rankSearchResults(shows, q, (s) => s.name, !state.sortField || state.sortField === "added");
 
       countEl.setText(`${shows.length} of ${allShows.length} show${allShows.length === 1 ? "" : "s"}`);
+      this.appendPersonChip(countEl, state, () => renderGrid());
 
       if (!allShows.length) {
         grid.createDiv({ cls: "movie-gallery-empty", text: 'No shows yet. Click "+ Add Show" to search TMDB.' });
@@ -3626,9 +4898,18 @@ class MovieGalleryPlugin extends Plugin {
       const f = this.settings.tvCardFields;
       const visibleShows = shows.slice(0, tvVisibleCount);
 
-      for (const s of visibleShows) {
-        const card = grid.createDiv({ cls: "movie-gallery-card" + (s.watched ? " watched" : "") + ` status-${statusOf(s)}` });
+      if (state.view === "list") {
+        this.renderListView(grid, visibleShows, "tv", state, {
+          rerenderSection: () => this.renderTvSection(el, stateKey),
+          activate: (s, tr) => (state.selecting ? toggleSel(s, tr) : new TvDetailModal(this.app, this, s).open()),
+          save: (s) => this.updateShow(s),
+        });
+      }
+
+      for (const s of state.view === "list" ? [] : visibleShows) {
+        const card = grid.createDiv({ cls: "movie-gallery-card" + (s.watched ? " watched" : "") + ` status-${statusOf(s)}` + (state.selecting ? " is-selecting" : "") + (state.selected.has(s.id) ? " is-selected" : "") });
         const posterWrap = card.createDiv({ cls: "movie-gallery-poster-wrap" });
+        if (state.selecting) posterWrap.createDiv({ cls: "mg-sel-box" + (state.selected.has(s.id) ? " is-on" : "") }).innerHTML = MG_ICONS.check;
         const posterUrl = getPosterUrl(s);
         const posterImg = posterWrap.createEl("img", { attr: { src: posterUrl, alt: s.name, loading: "lazy" } });
 
@@ -3664,7 +4945,7 @@ class MovieGalleryPlugin extends Plugin {
             `${Math.min(100, barRatio * 100)}%`;
         }
 
-        const openModal = () => new TvDetailModal(this.app, this, s).open();
+        const openModal = () => (state.selecting ? toggleSel(s, card) : new TvDetailModal(this.app, this, s).open());
         posterImg.addEventListener("click", (e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -3684,13 +4965,9 @@ class MovieGalleryPlugin extends Plugin {
         if (f.myRating && s.myRating) metaLine(`Me: ${s.myRating}`);
         if (f.genres) metaLine(s.genres);
         if (f.director) metaLine(s.creators);
-        if (f.cast) metaLine(s.cast);
-        if (f.release_date) metaLine(this.formatDate(s.first_air_date));
         if (f.runtime) metaLine(this.formatRuntime(s.episode_runtime));
         if (f.language) metaLine(this.languageName(s.original_language));
         if (f.network && s.network) metaLine(s.network);
-        if (f.overview && s.overview) card.createDiv({ cls: "movie-gallery-meta movie-gallery-overview-snippet", text: s.overview });
-        if (f.notes && s.notes) card.createDiv({ cls: "movie-gallery-meta movie-gallery-notes-snippet", text: s.notes });
 
         card.addEventListener("click", openModal);
       }
@@ -4646,7 +5923,14 @@ class MovieDetailModal extends Modal {
       f.createDiv({ cls: "movie-detail-fact-value", text: value });
     };
 
-    addFact("Director", m.director);
+    if (m.director) {
+      const f = facts.createDiv({ cls: "movie-detail-fact" });
+      f.createDiv({ cls: "movie-detail-fact-label", text: "Director" });
+      buildPeople(f, m.director, "director", (name, role) => {
+        this.close();
+        this.plugin.filterByPerson("movie", name, role);
+      });
+    }
     addFact("Release Date", this.plugin.formatDate(m.release_date));
     addFact("Runtime", this.plugin.formatRuntime(m.runtime));
     addFact("Language", this.plugin.languageName(m.original_language));
@@ -4683,7 +5967,10 @@ class MovieDetailModal extends Modal {
     if (m.cast) {
       const castFact = facts.createDiv({ cls: "movie-detail-fact movie-detail-fact-full movie-detail-fact-trailing" });
       castFact.createDiv({ cls: "movie-detail-fact-label", text: "Cast" });
-      castFact.createDiv({ cls: "movie-detail-fact-value", text: m.cast });
+      buildPeople(castFact, m.cast, "cast", (name, role) => {
+        this.close();
+        this.plugin.filterByPerson("movie", name, role);
+      });
     }
 
 
@@ -4726,7 +6013,22 @@ class MovieDetailModal extends Modal {
       }
     });
 
-    const deleteBtn = makeActionBtn(actions, "movie-detail-delete", "trash", "Delete");
+    const colBtn = makeActionBtn(actions, "movie-detail-edit-btn is-icon", "plus", "Collection");
+    colBtn.setAttribute("title", "Add to a collection");
+    colBtn.setAttribute("aria-label", "Add to a collection");
+    colBtn.addEventListener("click", () => new CollectionPickerModal(this.app, this.plugin, [{ t: "movie", id: m.id }]).open());
+
+    const noteBtn = makeActionBtn(actions, "movie-detail-edit-btn is-icon", "note", "Note");
+    noteBtn.setAttribute("title", "Open (or create) a note for this title");
+    noteBtn.setAttribute("aria-label", "Open note");
+    noteBtn.addEventListener("click", async () => {
+      this.close();
+      await this.plugin.openTitleNote(m, "movie");
+    });
+
+    const deleteBtn = makeActionBtn(actions, "movie-detail-delete is-icon", "trash", "Delete");
+    deleteBtn.setAttribute("title", "Delete");
+    deleteBtn.setAttribute("aria-label", "Delete");
     deleteBtn.addEventListener("click", async () => {
       if (confirm(`Delete "${m.title}" from your library?`)) {
         await this.plugin.removeMovie(m.id);
@@ -5022,7 +6324,14 @@ class TvDetailModal extends Modal {
       f.createDiv({ cls: "movie-detail-fact-value", text: value });
     };
 
-    addFact("Creator", s.creators);
+    if (s.creators) {
+      const f = facts.createDiv({ cls: "movie-detail-fact" });
+      f.createDiv({ cls: "movie-detail-fact-label", text: "Creator" });
+      buildPeople(f, s.creators, "creator", (name, role) => {
+        this.close();
+        this.plugin.filterByPerson("tv", name, role);
+      });
+    }
     addFact("First Air Date", this.plugin.formatDate(s.first_air_date));
     addFact("Episode Runtime", this.plugin.formatRuntime(s.episode_runtime));
     addFact("Language", this.plugin.languageName(s.original_language));
@@ -5078,7 +6387,10 @@ class TvDetailModal extends Modal {
     if (s.cast) {
       const castFact = facts.createDiv({ cls: "movie-detail-fact movie-detail-fact-full" });
       castFact.createDiv({ cls: "movie-detail-fact-label", text: "Cast" });
-      castFact.createDiv({ cls: "movie-detail-fact-value", text: s.cast });
+      buildPeople(castFact, s.cast, "cast", (name, role) => {
+        this.close();
+        this.plugin.filterByPerson("tv", name, role);
+      });
     }
 
 
@@ -5121,7 +6433,22 @@ class TvDetailModal extends Modal {
       }
     });
 
-    const deleteBtn = makeActionBtn(actions, "movie-detail-delete", "trash", "Delete");
+    const colBtn = makeActionBtn(actions, "movie-detail-edit-btn is-icon", "plus", "Collection");
+    colBtn.setAttribute("title", "Add to a collection");
+    colBtn.setAttribute("aria-label", "Add to a collection");
+    colBtn.addEventListener("click", () => new CollectionPickerModal(this.app, this.plugin, [{ t: "tv", id: s.id }]).open());
+
+    const noteBtn = makeActionBtn(actions, "movie-detail-edit-btn is-icon", "note", "Note");
+    noteBtn.setAttribute("title", "Open (or create) a note for this title");
+    noteBtn.setAttribute("aria-label", "Open note");
+    noteBtn.addEventListener("click", async () => {
+      this.close();
+      await this.plugin.openTitleNote(s, "tv");
+    });
+
+    const deleteBtn = makeActionBtn(actions, "movie-detail-delete is-icon", "trash", "Delete");
+    deleteBtn.setAttribute("title", "Delete");
+    deleteBtn.setAttribute("aria-label", "Delete");
     deleteBtn.addEventListener("click", async () => {
       if (confirm(`Delete "${s.name}" from your TV library?`)) {
         await this.plugin.removeShow(s.id);
@@ -5335,16 +6662,11 @@ class GallerySettingsModal extends Modal {
       ["rating", "Rating"],
       ["genres", "Genres"],
       ["director", "Director"],
-      ["cast", "Cast"],
       ["status", "Status"],
       ["favorite", "Favourite"],
-      ["release_date", "Release Date"],
       ["runtime", "Runtime"],
       ["language", "Language"],
-      ["budget", "Budget"],
       ["myRating", "My Rating"],
-      ["overview", "Overview"],
-      ["notes", "Notes"],
     ];
 
     fieldLabels.forEach(([key, label]) => {
@@ -5415,7 +6737,8 @@ class GallerySettingsModal extends Modal {
       refreshAll: (cb) => this.plugin.refreshAllMovies(cb),
       backup: (fmt) => this.plugin.backupMovies(fmt),
       importFile: (text, name, cb) => this.plugin.importMovies(text, name, cb),
-      importDesc: "Backup, Letterboxd or IMDb export",
+      importDesc: "Backup, Letterboxd (diary.csv adds watched dates) or IMDb export",
+      rebuild: () => this.plugin.rebuildMovieActivity(),
       noKeyMsg: "Set your TMDB API key first — needed to match Letterboxd/IMDb entries.",
       formatLabels: { letterboxd: "Letterboxd", imdb: "IMDb", native: "backup" },
     });
@@ -5451,17 +6774,13 @@ class TvGallerySettingsModal extends Modal {
       ["rating", "Rating"],
       ["genres", "Genres"],
       ["director", "Creator"],
-      ["cast", "Cast"],
       ["status", "Status"],
       ["favorite", "Favourite"],
-      ["release_date", "First Air Date"],
       ["runtime", "Episode Runtime"],
       ["language", "Language"],
       ["seasons", "Season progress"],
       ["episodes", "Episode progress"],
       ["myRating", "My Rating"],
-      ["overview", "Overview"],
-      ["notes", "Notes"],
     ];
 
     fieldLabels.forEach(([key, label]) => {
@@ -5595,8 +6914,10 @@ class StatsModal extends Modal {
     statCard(stats.toWatchCount, "To Watch");
     statCard(stats.droppedCount, "Trashed");
 
+    let ratingCardEl = null;
     if (stats.avgMyRating) {
       const ratingCard = contentEl.createDiv({ cls: "movie-stats-rating-card" });
+      ratingCardEl = ratingCard;
       const ratingTop = ratingCard.createDiv({ cls: "movie-stats-rating-card-top" });
       ratingTop.createDiv({ cls: "movie-stats-rating-card-star", text: "★" });
 
@@ -5615,6 +6936,7 @@ class StatsModal extends Modal {
     }
 
     const breakdownRow = contentEl.createDiv({ cls: "movie-stats-breakdown-row" });
+    if (ratingCardEl) breakdownRow.appendChild(ratingCardEl);
 
     const makeDonutCol = (title, centerText, centerLabel, conicStops, legendItems) => {
       const col = breakdownRow.createDiv({ cls: "movie-stats-breakdown-col" });
@@ -5821,8 +7143,10 @@ class TvStatsModal extends Modal {
     statCard(stats.toWatchCount, "To Watch");
     statCard(stats.droppedCount, "Trashed");
 
+    let ratingCardEl = null;
     if (stats.avgMyRating) {
       const ratingCard = contentEl.createDiv({ cls: "movie-stats-rating-card" });
+      ratingCardEl = ratingCard;
       const ratingTop = ratingCard.createDiv({ cls: "movie-stats-rating-card-top" });
       ratingTop.createDiv({ cls: "movie-stats-rating-card-star", text: "★" });
 
@@ -5841,6 +7165,7 @@ class TvStatsModal extends Modal {
     }
 
     const breakdownRow = contentEl.createDiv({ cls: "movie-stats-breakdown-row" });
+    if (ratingCardEl) breakdownRow.appendChild(ratingCardEl);
 
     const makeDonutCol = (title, centerText, centerLabel, conicStops, legendItems) => {
       const col = breakdownRow.createDiv({ cls: "movie-stats-breakdown-col" });
@@ -6046,6 +7371,44 @@ class MovieGallerySettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
             this.plugin.refreshGalleries();
           })
+      );
+
+    new Setting(containerEl)
+      .setName("Collections file")
+      .setDesc("File (relative to vault root) that stores your custom collections, e.g. collections.json")
+      .addText((text) =>
+        text
+          .setPlaceholder("collections.json")
+          .setValue(this.plugin.settings.collectionsFile)
+          .onChange(async (value) => {
+            this.plugin.settings.collectionsFile = value.trim() || "collections.json";
+            await this.plugin.saveSettings();
+            await this.plugin.loadCollections();
+            this.plugin.refreshGalleries();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Title notes folder")
+      .setDesc("Folder where \"Open note\" creates a note for a title, with its details as properties.")
+      .addText((text) =>
+        text
+          .setPlaceholder("TerroTrack Notes")
+          .setValue(this.plugin.settings.notesFolder)
+          .onChange(async (value) => {
+            this.plugin.settings.notesFolder = value.trim().replace(/^\/+|\/+$/g, "") || "TerroTrack Notes";
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Keep note properties in sync")
+      .setDesc("When a title changes (status, rating, favourite…), update the properties of its note if one exists. Your own text in the note is never touched.")
+      .addToggle((t) =>
+        t.setValue(this.plugin.settings.syncNoteProps !== false).onChange(async (v) => {
+          this.plugin.settings.syncNoteProps = v;
+          await this.plugin.saveSettings();
+        })
       );
 
     new Setting(containerEl)
