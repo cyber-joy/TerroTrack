@@ -47,6 +47,44 @@ const DEFAULT_SETTINGS = {
 
 const POSTER_BASE = "https://image.tmdb.org/t/p/w300";
 
+// Grouped card info: my-rating + genre chips, one person line, one facts line.
+function buildCardMeta(card, d) {
+  const genres = String(d.genres || "").split(",").map((g) => g.trim()).filter(Boolean);
+  const hasMe = d.myRating !== "" && d.myRating != null;
+  if (hasMe || genres.length) {
+    const chips = card.createDiv({ cls: "mg-card-chips" });
+    if (hasMe) chips.createSpan({ cls: "mg-chip mg-chip-me", text: `\u2605 ${d.myRating}` });
+    genres.slice(0, 2).forEach((g) => chips.createSpan({ cls: "mg-chip", text: g }));
+    if (genres.length > 2) chips.createSpan({ cls: "mg-chip mg-chip-more", text: `+${genres.length - 2}`, attr: { title: genres.slice(2).join(", ") } });
+  }
+  if (d.person) card.createDiv({ cls: "movie-gallery-meta mg-card-line", text: d.person, attr: { title: d.person } });
+  const facts = (d.facts || []).filter(Boolean);
+  if (facts.length) card.createDiv({ cls: "movie-gallery-meta mg-card-facts", text: facts.join(" \u00b7 ") });
+}
+
+// Library status: headline percent, stacked bar and a row per status.
+function renderStatusBreakdown(row, parts, total, watchedPct) {
+  const col = row.createDiv({ cls: "movie-stats-breakdown-col mg-stat-status" });
+  col.createDiv({ cls: "movie-stats-breakdown-title", text: "Library status" });
+  const head = col.createDiv({ cls: "mg-status-head" });
+  head.createSpan({ cls: "mg-status-pct", text: `${watchedPct}%` });
+  head.createSpan({ cls: "mg-status-sub", text: "watched" });
+  const bar = col.createDiv({ cls: "mg-status-bar" });
+  parts.forEach(([color, , n]) => {
+    const seg = bar.createDiv({ cls: "mg-status-seg" });
+    seg.style.flex = String(n);
+    seg.style.background = color;
+  });
+  const list = col.createDiv({ cls: "mg-status-list" });
+  parts.forEach(([color, label, n]) => {
+    const r = list.createDiv({ cls: "mg-status-row" });
+    r.createDiv({ cls: "mg-status-dot" }).style.background = color;
+    r.createSpan({ cls: "mg-status-name", text: label });
+    r.createSpan({ cls: "mg-status-count", text: String(n) });
+    r.createSpan({ cls: "mg-status-share", text: `${Math.round((n / total) * 100)}%` });
+  });
+}
+
 function getPosterUrl(m) {
   if (m.poster_path) return `${POSTER_BASE}${m.poster_path}`;
   if (m.custom_poster_url) return m.custom_poster_url;
@@ -2621,7 +2659,7 @@ class MovieGalleryPlugin extends Plugin {
     const width = 500;
     const height = 55;
     const padTop = 6;
-    const padBottom = 14;
+    const padBottom = 4;
     const padLeft = 2;
     const padRight = 2;
 
@@ -2682,10 +2720,7 @@ class MovieGalleryPlugin extends Plugin {
           </linearGradient>
         </defs>
         <path d="${areaPath}" fill="url(#${gradId})" />
-        <path d="${linePath}" fill="none" stroke="#eab308" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" />
-        ${dots}
-        <text x="${padLeft}" y="${height - 2}" fill="rgba(255,255,255,0.4)" font-size="9" font-family="inherit">${firstLabel}</text>
-        <text x="${lastLabelX}" y="${height - 2}" fill="rgba(255,255,255,0.6)" font-size="9" font-family="inherit" font-weight="600" text-anchor="end">${lastLabel}</text>
+        <path d="${linePath}" fill="none" stroke="#eab308" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" />
       </svg>
     `;
   }
@@ -4564,15 +4599,12 @@ class MovieGalleryPlugin extends Plugin {
           card.createDiv({ cls: "movie-gallery-title", text: titleText });
         }
 
-        const metaLine = (text) => {
-          if (text) card.createDiv({ cls: "movie-gallery-meta", text });
-        };
-
-        if (f.myRating && m.myRating) metaLine(`Me: ${m.myRating}`);
-        if (f.genres) metaLine(m.genres);
-        if (f.director) metaLine(m.director);
-        if (f.runtime) metaLine(this.formatRuntime(m.runtime));
-        if (f.language) metaLine(this.languageName(m.original_language));
+        buildCardMeta(card, {
+          myRating: f.myRating ? m.myRating : "",
+          genres: f.genres ? m.genres : "",
+          person: f.director ? m.director : "",
+          facts: [f.runtime ? this.formatRuntime(m.runtime) : "", f.language ? this.languageName(m.original_language) : ""],
+        });
 
         card.addEventListener("click", openModal);
       }
@@ -4958,16 +4990,12 @@ class MovieGalleryPlugin extends Plugin {
           card.createDiv({ cls: "movie-gallery-title", text: titleText });
         }
 
-        const metaLine = (text) => {
-          if (text) card.createDiv({ cls: "movie-gallery-meta", text });
-        };
-
-        if (f.myRating && s.myRating) metaLine(`Me: ${s.myRating}`);
-        if (f.genres) metaLine(s.genres);
-        if (f.director) metaLine(s.creators);
-        if (f.runtime) metaLine(this.formatRuntime(s.episode_runtime));
-        if (f.language) metaLine(this.languageName(s.original_language));
-        if (f.network && s.network) metaLine(s.network);
+        buildCardMeta(card, {
+          myRating: f.myRating ? s.myRating : "",
+          genres: f.genres ? s.genres : "",
+          person: f.director ? s.creators : "",
+          facts: [f.runtime ? this.formatRuntime(s.episode_runtime) : "", f.language ? this.languageName(s.original_language) : "", f.network ? s.network : ""],
+        });
 
         card.addEventListener("click", openModal);
       }
@@ -5813,7 +5841,9 @@ class MovieDetailModal extends Modal {
     const subtitleRow = info.createDiv({ cls: "movie-detail-subtitle" });
     if (m.year) subtitleRow.createSpan({ cls: "movie-detail-subtitle-year", text: m.year });
     if (m.year) subtitleRow.createSpan({ cls: "movie-detail-subtitle-dot", text: "·" });
-    subtitleRow.createSpan({ cls: "movie-detail-rating-pill", text: `★ ${m.rating}` });
+    const ratingPill = subtitleRow.createSpan({ cls: "movie-detail-rating-pill" });
+    ratingPill.createSpan({ cls: "movie-detail-rating-src", text: "TMDB" });
+    ratingPill.createSpan({ text: `★ ${m.rating}` });
 
     // -- Overview + genres, height-bounded to the poster ------------------
     const overviewGenresWrap = info.createDiv({ cls: "movie-detail-overview-genres" });
@@ -6215,7 +6245,9 @@ class TvDetailModal extends Modal {
     const subtitleRow = info.createDiv({ cls: "movie-detail-subtitle" });
     if (s.year) subtitleRow.createSpan({ cls: "movie-detail-subtitle-year", text: s.year });
     if (s.year) subtitleRow.createSpan({ cls: "movie-detail-subtitle-dot", text: "·" });
-    subtitleRow.createSpan({ cls: "movie-detail-rating-pill", text: `★ ${s.rating}` });
+    const ratingPill = subtitleRow.createSpan({ cls: "movie-detail-rating-pill" });
+    ratingPill.createSpan({ cls: "movie-detail-rating-src", text: "TMDB" });
+    ratingPill.createSpan({ text: `★ ${s.rating}` });
 
     const overviewGenresWrap = info.createDiv({ cls: "movie-detail-overview-genres" });
 
@@ -6881,6 +6913,7 @@ class StatsModal extends Modal {
 
   async onOpen() {
     const { contentEl } = this;
+    this.modalEl.addClass("mg-stats-modal-shell");
     contentEl.addClass("movie-gallery-stats-modal");
     contentEl.createEl("h2", { text: "Library Stats" });
     buildActivityHeatmap(contentEl, this.plugin);
@@ -6918,12 +6951,10 @@ class StatsModal extends Modal {
     if (stats.avgMyRating) {
       const ratingCard = contentEl.createDiv({ cls: "movie-stats-rating-card" });
       ratingCardEl = ratingCard;
-      const ratingTop = ratingCard.createDiv({ cls: "movie-stats-rating-card-top" });
-      ratingTop.createDiv({ cls: "movie-stats-rating-card-star", text: "★" });
-
-      const ratingText = ratingTop.createDiv({ cls: "movie-stats-rating-card-text" });
-      ratingText.createDiv({ cls: "movie-stats-rating-card-value", text: `${stats.avgMyRating} / 10` });
-      ratingText.createDiv({ cls: "movie-stats-rating-card-label", text: "Average of Your Ratings" });
+      ratingCard.createDiv({ cls: "movie-stats-breakdown-title", text: "Your average rating" });
+      const ratingValueRow = ratingCard.createDiv({ cls: "mg-rating-value-row" });
+      ratingValueRow.createSpan({ cls: "mg-rating-value", text: String(stats.avgMyRating) });
+      ratingValueRow.createSpan({ cls: "mg-rating-outof", text: "/ 10" });
 
       const ratedMovies = (await this.plugin.readMovies())
         .filter((m) => m.myRating !== "" && m.myRating != null)
@@ -6932,6 +6963,9 @@ class StatsModal extends Modal {
       if (trendSvg) {
         const trendWrap = ratingCard.createDiv({ cls: "movie-stats-rating-trend" });
         trendWrap.innerHTML = trendSvg;
+        const trendLabels = trendWrap.createDiv({ cls: "mg-trend-labels" });
+        trendLabels.createSpan({ text: "First rated" });
+        trendLabels.createSpan({ text: "Latest" });
       }
     }
 
@@ -6972,7 +7006,7 @@ class StatsModal extends Modal {
           return `${color} ${from}% ${acc}%`;
         })
         .join(", ");
-      makeDonutCol("Watched", `${watchedPct}%`, "watched", stops, parts.map(([color, label, n]) => [color, `${label} (${n})`]));
+      renderStatusBreakdown(breakdownRow, parts, stats.total, watchedPct);
     }
 
     if (stats.topGenres.length) {
@@ -6992,99 +7026,32 @@ class StatsModal extends Modal {
       const habitTile = (emoji, label, value, count, query) => {
         if (!value) return;
         const tile = habitsGrid.createDiv({ cls: "movie-stats-habit-tile" });
-        tile.createDiv({ cls: "movie-stats-habit-emoji", text: emoji });
-        tile.createDiv({ cls: "movie-stats-habit-value", text: value });
-        tile.createDiv({ cls: "movie-stats-habit-label", text: `${label} · ${count}x` });
+        tile.createDiv({ cls: "movie-stats-habit-label", text: label });
+        tile.createDiv({ cls: "movie-stats-habit-value", text: String(value), attr: { title: String(value) } });
+        tile.createDiv({ cls: "movie-stats-habit-count", text: `${count} ${count === 1 ? "title" : "titles"}` });
         if (this.galleryEl && query) {
           tile.addClass("is-clickable");
           tile.addEventListener("click", () => this.jumpToSearch(query));
         }
       };
 
-      habitTile("📅", "Favorite Year", stats.topYear?.[0], stats.topYear?.[1], null);
-      habitTile("🎥", "Top Director", stats.topDirector?.[0], stats.topDirector?.[1], stats.topDirector?.[0]);
-      habitTile("⭐", "Most-Seen Actor", stats.topCast?.[0], stats.topCast?.[1], stats.topCast?.[0]);
+      habitTile("", "Favorite Year", stats.topYear?.[0], stats.topYear?.[1], null);
+      habitTile("", "Top Director", stats.topDirector?.[0], stats.topDirector?.[1], stats.topDirector?.[0]);
+      habitTile("", "Most-Seen Actor", stats.topCast?.[0], stats.topCast?.[1], stats.topCast?.[0]);
     }
   }
 
   renderGenrePie(container, topGenres) {
-    const svgNS = "http://www.w3.org/2000/svg";
-    const svgEl = (tag, attrs = {}) => {
-      const el = document.createElementNS(svgNS, tag);
-      for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
-      return el;
-    };
-
-    const colors = ["#3b82f6", "#8b5cf6", "#eab308", "#4caf50", "#e0555f", "#f97316"];
-    const total = topGenres.reduce((sum, [, count]) => sum + count, 0);
-    const cx = 120;
-    const cy = 90;
-    const outerR = 40;
-    const ringR = 33;
-    const ringWidth = 13;
-    const circumference = 2 * Math.PI * ringR;
-
-    const wrap = container.createDiv({ cls: "movie-stats-pie-wrap" });
-    const svg = svgEl("svg", { viewBox: "0 0 240 180", width: "100%", height: "170" });
-
-    let offset = 0;
-    topGenres.forEach(([, count], i) => {
-      const pct = count / total;
-      const dash = pct * circumference;
-      const circle = svgEl("circle", {
-        cx, cy, r: ringR,
-        fill: "none",
-        stroke: colors[i % colors.length],
-        "stroke-width": ringWidth,
-        "stroke-dasharray": `${dash} ${circumference - dash}`,
-        "stroke-dashoffset": String(-offset),
-        transform: `rotate(-90 ${cx} ${cy})`,
-      });
-      svg.appendChild(circle);
-      offset += dash;
-    });
-
-    let acc = 0;
+    const max = Math.max(1, ...topGenres.map(([, count]) => count));
+    const list = container.createDiv({ cls: "mg-genre-bars" });
     topGenres.forEach(([genre, count], i) => {
-      const midPct = (acc + count / 2) / total;
-      acc += count;
-      const angle = -90 + midPct * 360;
-      const rad = (angle * Math.PI) / 180;
-      const cos = Math.cos(rad);
-      const sin = Math.sin(rad);
-
-      const x1 = cx + outerR * cos;
-      const y1 = cy + outerR * sin;
-      const x2 = cx + (outerR + 14) * cos;
-      const y2 = cy + (outerR + 14) * sin;
-      const labelX = cx + (outerR + 18) * cos;
-      const labelY = cy + (outerR + 18) * sin;
-      const anchor = cos > 0.15 ? "start" : cos < -0.15 ? "end" : "middle";
-
-      svg.appendChild(
-        svgEl("line", { x1, y1, x2, y2, stroke: colors[i % colors.length], "stroke-width": "1.5" })
-      );
-      const text = svgEl("text", {
-        x: labelX, y: labelY, fill: "#ccc", "font-size": "8.5",
-        "text-anchor": anchor, "dominant-baseline": "middle",
-      });
-      text.textContent = `${genre} (${count})`;
-      svg.appendChild(text);
+      const row = list.createDiv({ cls: "mg-genre-row" });
+      row.createSpan({ cls: "mg-genre-name", text: genre, attr: { title: genre } });
+      const track = row.createDiv({ cls: "mg-genre-track" });
+      const fill = track.createDiv({ cls: "mg-genre-fill" + (i === 0 ? " is-top" : "") });
+      fill.style.width = `${Math.max(4, Math.round((count / max) * 100))}%`;
+      row.createSpan({ cls: "mg-genre-count", text: String(count) });
     });
-
-    const centerText = svgEl("text", {
-      x: cx, y: cy - 4, fill: "#fff", "font-size": "15", "font-weight": "700", "text-anchor": "middle",
-    });
-    centerText.textContent = String(total);
-    svg.appendChild(centerText);
-
-    const centerLabel = svgEl("text", {
-      x: cx, y: cy + 11, fill: "rgba(255,255,255,0.55)", "font-size": "8", "text-anchor": "middle",
-    });
-    centerLabel.textContent = "tagged";
-    svg.appendChild(centerLabel);
-
-    wrap.appendChild(svg);
   }
 
   onClose() {
@@ -7110,6 +7077,7 @@ class TvStatsModal extends Modal {
 
   async onOpen() {
     const { contentEl } = this;
+    this.modalEl.addClass("mg-stats-modal-shell");
     contentEl.addClass("movie-gallery-stats-modal");
     contentEl.createEl("h2", { text: "TV Stats" });
     buildActivityHeatmap(contentEl, this.plugin);
@@ -7147,12 +7115,10 @@ class TvStatsModal extends Modal {
     if (stats.avgMyRating) {
       const ratingCard = contentEl.createDiv({ cls: "movie-stats-rating-card" });
       ratingCardEl = ratingCard;
-      const ratingTop = ratingCard.createDiv({ cls: "movie-stats-rating-card-top" });
-      ratingTop.createDiv({ cls: "movie-stats-rating-card-star", text: "★" });
-
-      const ratingText = ratingTop.createDiv({ cls: "movie-stats-rating-card-text" });
-      ratingText.createDiv({ cls: "movie-stats-rating-card-value", text: `${stats.avgMyRating} / 10` });
-      ratingText.createDiv({ cls: "movie-stats-rating-card-label", text: "Average of Your Ratings" });
+      ratingCard.createDiv({ cls: "movie-stats-breakdown-title", text: "Your average rating" });
+      const ratingValueRow = ratingCard.createDiv({ cls: "mg-rating-value-row" });
+      ratingValueRow.createSpan({ cls: "mg-rating-value", text: String(stats.avgMyRating) });
+      ratingValueRow.createSpan({ cls: "mg-rating-outof", text: "/ 10" });
 
       const ratedShows = (await this.plugin.readShows())
         .filter((s) => s.myRating !== "" && s.myRating != null)
@@ -7161,6 +7127,9 @@ class TvStatsModal extends Modal {
       if (trendSvg) {
         const trendWrap = ratingCard.createDiv({ cls: "movie-stats-rating-trend" });
         trendWrap.innerHTML = trendSvg;
+        const trendLabels = trendWrap.createDiv({ cls: "mg-trend-labels" });
+        trendLabels.createSpan({ text: "First rated" });
+        trendLabels.createSpan({ text: "Latest" });
       }
     }
 
@@ -7201,7 +7170,7 @@ class TvStatsModal extends Modal {
           return `${color} ${from}% ${acc}%`;
         })
         .join(", ");
-      makeDonutCol("Watched", `${watchedPct}%`, "watched", stops, parts.map(([color, label, n]) => [color, `${label} (${n})`]));
+      renderStatusBreakdown(breakdownRow, parts, stats.total, watchedPct);
     }
 
     if (stats.topGenres.length) {
@@ -7221,99 +7190,32 @@ class TvStatsModal extends Modal {
       const habitTile = (emoji, label, value, count, query) => {
         if (!value) return;
         const tile = habitsGrid.createDiv({ cls: "movie-stats-habit-tile" });
-        tile.createDiv({ cls: "movie-stats-habit-emoji", text: emoji });
-        tile.createDiv({ cls: "movie-stats-habit-value", text: value });
-        tile.createDiv({ cls: "movie-stats-habit-label", text: `${label} · ${count}x` });
+        tile.createDiv({ cls: "movie-stats-habit-label", text: label });
+        tile.createDiv({ cls: "movie-stats-habit-value", text: String(value), attr: { title: String(value) } });
+        tile.createDiv({ cls: "movie-stats-habit-count", text: `${count} ${count === 1 ? "title" : "titles"}` });
         if (this.galleryEl && query) {
           tile.addClass("is-clickable");
           tile.addEventListener("click", () => this.jumpToSearch(query));
         }
       };
 
-      habitTile("📅", "Favorite Year", stats.topYear?.[0], stats.topYear?.[1], null);
-      habitTile("🎥", "Top Creator", stats.topDirector?.[0], stats.topDirector?.[1], stats.topDirector?.[0]);
-      habitTile("⭐", "Most-Seen Actor", stats.topCast?.[0], stats.topCast?.[1], stats.topCast?.[0]);
+      habitTile("", "Favorite Year", stats.topYear?.[0], stats.topYear?.[1], null);
+      habitTile("", "Top Creator", stats.topDirector?.[0], stats.topDirector?.[1], stats.topDirector?.[0]);
+      habitTile("", "Most-Seen Actor", stats.topCast?.[0], stats.topCast?.[1], stats.topCast?.[0]);
     }
   }
 
   renderGenrePie(container, topGenres) {
-    const svgNS = "http://www.w3.org/2000/svg";
-    const svgEl = (tag, attrs = {}) => {
-      const el = document.createElementNS(svgNS, tag);
-      for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
-      return el;
-    };
-
-    const colors = ["#3b82f6", "#8b5cf6", "#eab308", "#4caf50", "#e0555f", "#f97316"];
-    const total = topGenres.reduce((sum, [, count]) => sum + count, 0);
-    const cx = 120;
-    const cy = 90;
-    const outerR = 40;
-    const ringR = 33;
-    const ringWidth = 13;
-    const circumference = 2 * Math.PI * ringR;
-
-    const wrap = container.createDiv({ cls: "movie-stats-pie-wrap" });
-    const svg = svgEl("svg", { viewBox: "0 0 240 180", width: "100%", height: "170" });
-
-    let offset = 0;
-    topGenres.forEach(([, count], i) => {
-      const pct = count / total;
-      const dash = pct * circumference;
-      const circle = svgEl("circle", {
-        cx, cy, r: ringR,
-        fill: "none",
-        stroke: colors[i % colors.length],
-        "stroke-width": ringWidth,
-        "stroke-dasharray": `${dash} ${circumference - dash}`,
-        "stroke-dashoffset": String(-offset),
-        transform: `rotate(-90 ${cx} ${cy})`,
-      });
-      svg.appendChild(circle);
-      offset += dash;
-    });
-
-    let acc = 0;
+    const max = Math.max(1, ...topGenres.map(([, count]) => count));
+    const list = container.createDiv({ cls: "mg-genre-bars" });
     topGenres.forEach(([genre, count], i) => {
-      const midPct = (acc + count / 2) / total;
-      acc += count;
-      const angle = -90 + midPct * 360;
-      const rad = (angle * Math.PI) / 180;
-      const cos = Math.cos(rad);
-      const sin = Math.sin(rad);
-
-      const x1 = cx + outerR * cos;
-      const y1 = cy + outerR * sin;
-      const x2 = cx + (outerR + 14) * cos;
-      const y2 = cy + (outerR + 14) * sin;
-      const labelX = cx + (outerR + 18) * cos;
-      const labelY = cy + (outerR + 18) * sin;
-      const anchor = cos > 0.15 ? "start" : cos < -0.15 ? "end" : "middle";
-
-      svg.appendChild(
-        svgEl("line", { x1, y1, x2, y2, stroke: colors[i % colors.length], "stroke-width": "1.5" })
-      );
-      const text = svgEl("text", {
-        x: labelX, y: labelY, fill: "#ccc", "font-size": "8.5",
-        "text-anchor": anchor, "dominant-baseline": "middle",
-      });
-      text.textContent = `${genre} (${count})`;
-      svg.appendChild(text);
+      const row = list.createDiv({ cls: "mg-genre-row" });
+      row.createSpan({ cls: "mg-genre-name", text: genre, attr: { title: genre } });
+      const track = row.createDiv({ cls: "mg-genre-track" });
+      const fill = track.createDiv({ cls: "mg-genre-fill" + (i === 0 ? " is-top" : "") });
+      fill.style.width = `${Math.max(4, Math.round((count / max) * 100))}%`;
+      row.createSpan({ cls: "mg-genre-count", text: String(count) });
     });
-
-    const centerText = svgEl("text", {
-      x: cx, y: cy - 4, fill: "#fff", "font-size": "15", "font-weight": "700", "text-anchor": "middle",
-    });
-    centerText.textContent = String(total);
-    svg.appendChild(centerText);
-
-    const centerLabel = svgEl("text", {
-      x: cx, y: cy + 11, fill: "rgba(255,255,255,0.55)", "font-size": "8", "text-anchor": "middle",
-    });
-    centerLabel.textContent = "tagged";
-    svg.appendChild(centerLabel);
-
-    wrap.appendChild(svg);
   }
 
   onClose() {

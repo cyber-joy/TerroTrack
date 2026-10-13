@@ -4257,3 +4257,94 @@ body.theme-light .mg-week-pop { box-shadow: 0 14px 36px rgba(20, 22, 30, 0.22); 
   .movie-stats-banner-hero .movie-stats-banner-badge { grid-column: 1 / -1; grid-row: auto; margin-top: 8px; }
   .movie-stats-banner-hero .movie-stats-banner-quip { grid-column: 1 / -1; grid-row: auto; }
 }
+
+/* Obsidian's .modal sets its own width: override it (same pattern as the filter modal) */
+.mg-stats-modal-shell {
+  width: 860px !important;
+  max-width: 94vw !important;
+}
+.mg-stats-modal-shell .movie-gallery-stats-modal { max-width: 100%; }
+
+/* genre ring: coloured legend instead of tiny leader labels */
+.movie-gallery-stats-modal .movie-stats-pie-legend-wrap {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  justify-content: flex-start;
+}
+.movie-gallery-stats-modal .movie-stats-pie-legend-wrap svg { flex-shrink: 0; width: 120px; height: 120px; max-height: none; }
+.movie-gallery-stats-modal .movie-stats-genre-legend { flex-direction: column; align-items: flex-start; gap: 5px; }
+.movie-gallery-stats-modal .movie-stats-genre-col { flex: 1.3; }
+
+/* ---- gallery card info: grouped, truncated, quiet ---- */
+.movie-gallery-card .mg-card-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.movie-gallery-card .mg-chip {
+  display: inline-block;
+  max-width: 100%;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--mg-fg), 0.16);
+  color: var(--mg-text-muted);
+  font-size: 0.72em;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.movie-gallery-card .mg-chip-me { border-color: #3a68c2; color: var(--mg-accent); font-weight: 600; }
+.movie-gallery-card .mg-card-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.movie-stats-mini-legend.movie-stats-genre-legend { margin: 0; width: auto; }
+
+/* ===== Stats refinements (scoped so Obsidian/theme rules cannot override) ===== */
+.movie-gallery-stats-modal .movie-stats-breakdown-col { text-align: left; padding: 12px 14px; }
+.movie-gallery-stats-modal .movie-stats-breakdown-title { text-align: left; margin-bottom: 8px; }
+
+.movie-gallery-stats-modal .movie-stats-rating-card { text-align: left; padding: 12px 14px; }
+.movie-gallery-stats-modal .mg-rating-value-row { display: flex; align-items: baseline; gap: 6px; margin: 2px 0 8px; }
+.movie-gallery-stats-modal .mg-rating-value { font-size: 2.1em; font-weight: 700; line-height: 1; color: var(--mg-tone-yellow); }
+.movie-gallery-stats-modal .mg-rating-outof { font-size: 0.85em; color: var(--mg-text-muted); }
+.movie-gallery-stats-modal .mg-trend-labels { display: flex; justify-content: space-between; font-size: 0.62em; color: var(--mg-text-muted); margin-top: 3px; }
+
+.movie-gallery-stats-modal .mg-status-head { display: flex; align-items: baseline; gap: 6px; margin-bottom: 8px; }
+.movie-gallery-stats-modal .mg-status-pct { font-size: 2.1em; font-weight: 700; line-height: 1; }
+.movie-gallery-stats-modal .mg-status-sub { font-size: 0.85em; color: var(--mg-text-muted); }
+.movie-gallery-stats-modal .mg-status-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; gap: 2px; margin-bottom: 10px; }
+.movie-gallery-stats-modal .mg-status-seg { min-width: 4px; }
+.movie-gallery-stats-modal .mg-status-list { display: flex; flex-direction: column; gap: 5px; }
+.movie-gallery-stats-modal .mg-status-row { display: flex; align-items: center; gap: 7px; font-size: 0.78em; }
+.movie-gallery-stats-modal .mg-status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.movie-gallery-stats-modal .mg-status-name { flex: 1; color: var(--mg-text-muted); }
+.movie-gallery-stats-modal .mg-status-count { font-weight: 700; }
+.movie-gallery-stats-modal .mg-status-share { width: 34px; text-align: right; color: var(--mg-text-muted); }
+
+.movie-gallery-stats-modal .movie-stats-genre-col { flex: 1.5; }
+.movie-gallery-stats-modal .mg-genre-bars { display: flex; flex-direction: column; gap: 7px; }
+.movie-gallery-stats-modal .mg-genre-row { display: flex; align-items: center; gap: 8px; font-size: 0.78em; }
+.movie-gallery-stats-modal .mg-genre-name { width: 82px; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.movie-gallery-stats-modal .mg-genre-track { flex: 1; height: 8px; border-radius: 4px; background: rgba(var(--mg-fg), 0.08); overflow: hidden; }
+.movie-gallery-stats-modal .mg-genre-fill { height: 100%; border-radius: 4px; background: #3a68c2; opacity: 0.6; }
+.movie-gallery-stats-modal .mg-genre-fill.is-top { opacity: 1; background: linear-gradient(90deg, #3a68c2, #2f5bb0); }
+.movie-gallery-stats-modal .mg-genre-count { width: 24px; text-align: right; font-weight: 700; }
+
+.movie-gallery-stats-modal .movie-stats-habit-tile { text-align: left; padding: 10px 12px; }
+.movie-gallery-stats-modal .movie-stats-habit-label { order: 0; font-size: 0.62em; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 4px; }
+.movie-gallery-stats-modal .movie-stats-habit-value { font-size: 0.95em; margin-bottom: 2px; }
+.movie-gallery-stats-modal .movie-stats-habit-count { font-size: 0.7em; color: var(--mg-text-muted); }
+
+/* details: rating source label (scoped, no size change to the modal) */
+.movie-detail-modal .movie-detail-rating-src {
+  font-size: 0.78em;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  opacity: 0.8;
+  padding-right: 6px;
+  margin-right: 2px;
+  border-right: 1px solid rgba(234, 179, 8, 0.35);
+}
+
+/* gallery cards: left-align text under the poster */
+.movie-gallery-card .movie-gallery-title,
+.movie-gallery-card .movie-gallery-meta,
+.movie-gallery-card .mg-card-chips { text-align: left; justify-content: flex-start; }
+.movie-gallery-card { align-items: stretch; text-align: left; }
+.movie-gallery-card .movie-gallery-poster-wrap { width: 100%; }
