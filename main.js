@@ -6,6 +6,9 @@ const DEFAULT_SETTINGS = {
   tmdbApiKey: "",
   dataFile: "movies.json",
   tvDataFile: "tvshows.json",
+  animeDataFile: "anime.json",
+  animeTitleLanguage: "english",
+  malClientId: "",
   activityFile: "activity.json",
   collectionsFile: "collections.json",
   notesFolder: "TerroTrack Notes",
@@ -83,6 +86,248 @@ function renderStatusBreakdown(row, parts, total, watchedPct) {
     r.createSpan({ cls: "mg-status-count", text: String(n) });
     r.createSpan({ cls: "mg-status-share", text: `${Math.round((n / total) * 100)}%` });
   });
+}
+
+// ---------- Anime: AniList + MyAnimeList (Jikan) data helpers ----------
+const ANILIST_URL = "https://graphql.anilist.co";
+const ANILIST_PER_MINUTE = 26; // AniList can allow as few as 30 requests a minute
+const JIKAN_TIMEOUT_MS = 8000;
+const JIKAN_URL = "https://api.jikan.moe/v4";
+const MAL_URL = "https://api.myanimelist.net/v2";
+const MAL_FIELDS = "id,title,main_picture,alternative_titles,start_date,synopsis,mean,media_type,status,genres,num_episodes,start_season,average_episode_duration,studios,nsfw";
+const MAL_FORMATS = { tv: "TV", ova: "OVA", ona: "ONA", movie: "Movie", special: "Special", tv_special: "TV Special", music: "Music" };
+const MAL_RELATIONS = { sequel: "Sequel", prequel: "Prequel", alternative_setting: "Alternative", alternative_version: "Alternative", side_story: "Side story", parent_story: "Parent story", summary: "Summary", full_story: "Full story", spin_off: "Spin-off", other: "Related", character: "Shared characters" };
+const ANILIST_MEDIA_FIELDS =
+  "id idMal title { romaji english native } startDate { year month day } format status episodes duration averageScore genres description(asHtml: false) coverImage { large } studios { edges { isMain node { name isAnimationStudio } } } countryOfOrigin trailer { id site } nextAiringEpisode { episode } isAdult synonyms";
+const ANIME_STATUS_MAP = { FINISHED: "Ended", RELEASING: "Returning Series", CANCELLED: "Canceled", HIATUS: "Returning Series", NOT_YET_RELEASED: "Planned" };
+const ANIME_COUNTRY_LANG = { JP: "ja", CN: "zh", KR: "ko", TW: "zh" };
+const ANIME_MAL_OFFSET = 900000000; // id for titles found only on MyAnimeList
+let ANIME_TITLE_LANG = "english";
+const ANIME_FORMATS = { TV: "TV", TV_SHORT: "TV Short", MOVIE: "Movie", SPECIAL: "Special", OVA: "OVA", ONA: "ONA", MUSIC: "Music", "TV Special": "TV Special", Movie: "Movie" };
+const ANIME_RELATIONS = { PREQUEL: "Prequel", SEQUEL: "Sequel", PARENT: "Parent story", SIDE_STORY: "Side story", SPIN_OFF: "Spin-off", ALTERNATIVE: "Alternative", SUMMARY: "Summary", CHARACTER: "Shared characters", OTHER: "Related", COMPILATION: "Compilation", CONTAINS: "Contains" };
+const ANIME_RELATION_ORDER = ["PREQUEL", "SEQUEL", "PARENT", "SIDE_STORY", "SPIN_OFF", "ALTERNATIVE", "SUMMARY", "COMPILATION", "CONTAINS", "CHARACTER", "OTHER"];
+// A title that is still releasing hasn't finished, so reaching its last aired episode doesn't complete it.
+const animeIsAiring = (s) => /returning|planned|in production/i.test(String((s && s.show_status) || ""));
+const animeTotalKnown = (s) => (s.total_known !== undefined ? !!s.total_known : !animeIsAiring(s));
+const normAnimeFormat = (f) => ANIME_FORMATS[f] || (f ? String(f) : "");
+// Filter groups: TV Short counts as TV, TV Special as Special; anything else (e.g. Music) is "Other".
+const animeFormatGroup = (f) => {
+  const n = normAnimeFormat(f);
+  if (n === "TV" || n === "TV Short") return "TV";
+  if (n === "Movie") return "Movie";
+  if (n === "ONA" || n === "OVA") return n;
+  if (n === "Special" || n === "TV Special") return "Special";
+  return n ? "Other" : "";
+};
+
+// The displayed title follows the "Anime title language" setting.
+function chooseAnimeTitle(e) {
+  const order = ANIME_TITLE_LANG === "native" ? ["title_native", "title_romaji", "title_english"] : ANIME_TITLE_LANG === "romaji" ? ["title_romaji", "title_english", "title_native"] : ["title_english", "title_romaji", "title_native"];
+  for (const k of order) if (e[k]) return e[k];
+  return e.name || "";
+}
+function animeAltNames(s) {
+  const seen = new Set([String(s.name || "").toLowerCase()]);
+  return [s.title_romaji, s.title_english, s.title_native].filter((n) => {
+    const k = String(n || "").toLowerCase();
+    if (!k || seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+const animeNeedsCast = (s) =>
+  !!(s.anilist_id || s.mal_id) &&
+  ((s.cast && s.cast_v !== 4 && s.anilist_id) || (!s.cast && !(s.cast_checked && s.cast_v === 4 && Date.now() - s.cast_checked < 7 * 86400000)));
+const animeAllNames = (s) => [s.name, s.title_english, s.title_romaji, s.title_native, ...(Array.isArray(s.synonyms) ? s.synonyms : [])].filter(Boolean);
+
+function cleanHtml(t) {
+  return String(t || "").replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim();
+}
+
+function animeFromAniList(a) {
+  const t = a.title || {};
+  const sd = a.startDate || {};
+  const pad = (n) => String(n).padStart(2, "0");
+  const aired = a.nextAiringEpisode && a.nextAiringEpisode.episode ? a.nextAiringEpisode.episode - 1 : 0;
+  const rating = a.averageScore ? (a.averageScore / 10).toFixed(1) : "";
+  return {
+    al_id: a.id,
+    mal_id: a.idMal || null,
+    name: t.english || t.romaji || t.native || "",
+    t_en: t.english || "",
+    t_ro: t.romaji || "",
+    t_jp: t.native || "",
+    synonyms: a.synonyms || [],
+    year: sd.year ? String(sd.year) : "",
+    first_air_date: sd.year ? `${sd.year}-${pad(sd.month || 1)}-${pad(sd.day || 1)}` : "",
+    episodes: a.episodes || null,
+    aired,
+    runtime: a.duration || null,
+    rating,
+    rating_source: rating ? "AniList" : "",
+    status: ANIME_STATUS_MAP[a.status] || "",
+    genres: (a.genres || []).join(", "),
+    studios: (() => {
+      const st = a.studios || {};
+      const edges = st.edges || [];
+      let names = edges.filter((e) => e.isMain && e.node).map((e) => e.node.name);
+      if (!names.length) names = edges.filter((e) => e.node && e.node.isAnimationStudio).map((e) => e.node.name);
+      if (!edges.length && st.nodes) names = st.nodes.map((n) => n.name);
+      return names.join(", ");
+    })(),
+    overview: cleanHtml(a.description),
+    poster: (a.coverImage && a.coverImage.large) || "",
+    trailer: a.trailer && /youtube/i.test(a.trailer.site || "") ? a.trailer.id : "",
+    lang: ANIME_COUNTRY_LANG[a.countryOfOrigin] || "",
+    format: normAnimeFormat(a.format),
+  };
+}
+
+function animeFromMalApi(n) {
+  const alt = n.alternative_titles || {};
+  const sd = n.start_date || "";
+  const full = sd.length === 10 ? sd : sd.length === 7 ? sd + "-01" : sd.length === 4 ? sd + "-01-01" : "";
+  const st = String(n.status || "");
+  return {
+    al_id: null,
+    mal_id: n.id,
+    name: alt.en || n.title || "",
+    t_en: alt.en || "",
+    t_ro: n.title || "",
+    t_jp: alt.ja || "",
+    synonyms: alt.synonyms || [],
+    year: n.start_season && n.start_season.year ? String(n.start_season.year) : sd ? sd.slice(0, 4) : "",
+    first_air_date: full,
+    episodes: n.num_episodes || null,
+    runtime: n.average_episode_duration ? Math.round(n.average_episode_duration / 60) : null,
+    rating: n.mean ? Number(n.mean).toFixed(1) : "",
+    rating_source: n.mean ? "MAL" : "",
+    status: st === "finished_airing" ? "Ended" : st === "currently_airing" ? "Returning Series" : st === "not_yet_aired" ? "Planned" : "",
+    genres: (n.genres || []).map((g) => g.name).join(", "),
+    studios: (n.studios || []).map((x) => x.name).join(", "),
+    overview: n.synopsis || "",
+    poster: (n.main_picture && (n.main_picture.large || n.main_picture.medium)) || "",
+    trailer: "",
+    lang: "ja",
+    format: MAL_FORMATS[n.media_type] || (n.media_type ? String(n.media_type).toUpperCase() : ""),
+  };
+}
+
+function animeFromJikan(j) {
+  const from = (j.aired && j.aired.from) || "";
+  const st = String(j.status || "");
+  const rating = j.score ? Number(j.score).toFixed(1) : "";
+  return {
+    al_id: null,
+    mal_id: j.mal_id,
+    name: j.title_english || j.title || "",
+    t_en: j.title_english || "",
+    t_ro: j.title || "",
+    t_jp: j.title_japanese || "",
+    synonyms: j.title_synonyms || [],
+    year: j.year ? String(j.year) : from ? from.slice(0, 4) : "",
+    first_air_date: from ? from.slice(0, 10) : "",
+    episodes: j.episodes || null,
+    runtime: parseInt(j.duration, 10) || null,
+    rating,
+    rating_source: rating ? "MAL" : "",
+    status: /finished/i.test(st) ? "Ended" : /currently/i.test(st) ? "Returning Series" : /not yet/i.test(st) ? "Planned" : "",
+    genres: (j.genres || []).map((g) => g.name).join(", "),
+    studios: (j.studios || []).map((x) => x.name).join(", "),
+    overview: j.synopsis || "",
+    poster: (j.images && j.images.jpg && (j.images.jpg.large_image_url || j.images.jpg.image_url)) || "",
+    trailer: (j.trailer && j.trailer.youtube_id) || "",
+    lang: "ja",
+    format: normAnimeFormat(j.type),
+  };
+}
+
+// One title found on one or both sites: AniList wins, MyAnimeList fills any gaps.
+function mergeAnimeCandidates(al, jk) {
+  if (!al) return { ...jk, found_on: "MyAnimeList" };
+  if (!jk) return { ...al, found_on: "AniList" };
+  const out = { ...jk };
+  Object.keys(al).forEach((k) => {
+    if (k === "synonyms") return;
+    if (al[k] !== "" && al[k] != null) out[k] = al[k];
+  });
+  out.synonyms = Array.from(new Set([...(al.synonyms || []), ...(jk.synonyms || [])]));
+  out.mal_id = al.mal_id || jk.mal_id;
+  out.found_on = "AniList · MyAnimeList";
+  return out;
+}
+
+function animeToDiscoverItem(a) {
+  const c = animeFromAniList(a);
+  const entry = animeCandidateToEntry(c);
+  return {
+    id: entry.id,
+    name: c.name,
+    first_air_date: c.first_air_date,
+    vote_average: parseFloat(c.rating) || 0,
+    poster_url: c.poster,
+    overview: c.overview,
+    genres_text: c.genres,
+    mal_id: c.mal_id,
+    _entry: entry,
+  };
+}
+
+function animeCandidateToEntry(c) {
+  const total = c.episodes || null;
+  const aired = c.aired || total || 0;
+  const eps = total || aired || null;
+  return {
+    id: c.al_id || ANIME_MAL_OFFSET + c.mal_id,
+    anilist_id: c.al_id || null,
+    mal_id: c.mal_id || null,
+    name: c.name,
+    title_english: c.t_en || "",
+    title_romaji: c.t_ro || "",
+    title_native: c.t_jp || "",
+    synonyms: c.synonyms || [],
+    related: [],
+    extras_v: 0,
+    year: c.year || "????",
+    poster_path: "",
+    custom_poster_url: c.poster || "",
+    rating: c.rating || "0.0",
+    rating_source: c.rating_source || "",
+    myRating: "",
+    notes: "",
+    watched: false,
+    episodesWatched: 0,
+    seasonsWatched: 0,
+    first_air_date: c.first_air_date || "",
+    last_air_date: "",
+    show_status: c.status || "",
+    number_of_seasons: 1,
+    number_of_episodes: eps,
+    total_known: !!total,
+    episodes_aired: aired,
+    season_episodes: eps ? [eps] : [],
+    episode_runtime: c.runtime || null,
+    original_language: c.lang || "",
+    genres: c.genres || "",
+    creators: c.studios || "",
+    cast: "",
+    overview: c.overview || "",
+    trailer_key: c.trailer || "",
+    format: c.format || "",
+  };
+}
+
+// True for fields you type in; background work must not rebuild the page while one has focus.
+function isEditable(el) {
+  return !!el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable === true);
+}
+function rerenderWhenIdle(modal) {
+  const a = document.activeElement;
+  if (isEditable(a)) {
+    a.addEventListener("blur", () => {
+      if (!modal._closed) modal.renderView();
+    }, { once: true });
+  } else modal.renderView();
 }
 
 function getPosterUrl(m) {
@@ -175,9 +420,6 @@ const FILTER_ICON_SVG =
 
 const STATS_ICON_SVG =
   '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>';
-
-const SORT_ICON_SVG =
-  '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M6 12h12M10 18h4"/></svg>';
 
 function makeFormRow(parent, full = false) {
   return parent.createDiv({ cls: "movie-add-row" + (full ? " movie-add-row-full" : "") });
@@ -426,9 +668,9 @@ function addDays(d, n) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
 }
 
-function buildActivityHeatmap(container, plugin) {
+function buildActivityHeatmap(container, plugin, fixed) {
   const real = plugin.activity || (plugin.activity = {});
-  const view = { filter: "all", range: "year", offset: 0 };
+  const view = { filter: fixed || "all", range: "year", offset: 0 };
 
   const root = container.createDiv({ cls: "movie-heatmap" });
   const draw = () => {
@@ -439,7 +681,7 @@ function buildActivityHeatmap(container, plugin) {
     const valueOf = (key) => {
       const v = data[key];
       if (!v) return 0;
-      return view.filter === "movie" ? v.m || 0 : view.filter === "tv" ? v.t || 0 : (v.m || 0) + (v.t || 0);
+      return view.filter === "movie" ? v.m || 0 : view.filter === "tv" ? v.t || 0 : view.filter === "anime" ? v.a || 0 : (v.m || 0) + (v.t || 0) + (v.a || 0);
     };
     const keys = Object.keys(data).filter((k) => valueOf(k) > 0).sort();
     const earliest = keys.length ? parseDateKey(keys[0]) : today;
@@ -507,16 +749,18 @@ function buildActivityHeatmap(container, plugin) {
     // ---- header: title + media filter ----
     const head = root.createDiv({ cls: "movie-heatmap-head" });
     const titles = head.createDiv({ cls: "movie-heatmap-titles" });
-    titles.createDiv({ cls: "movie-heatmap-title", text: "Activity" });
+    titles.createDiv({ cls: "movie-heatmap-title", text: "Activity", attr: { title: "Logged when you mark a movie Watched or step TV episodes, on the date you pick (today by default). Set a movie's watched date from its details. Anime episodes are counted separately." } });
     titles.createDiv({ cls: "movie-heatmap-sub", text: `${total} ${total === 1 ? "activity" : "activities"} ${phrase}` });
-    const seg = head.createDiv({ cls: "movie-heatmap-seg", attr: { role: "radiogroup" } });
-    [["all", "All"], ["movie", "Movies"], ["tv", "TV"]].forEach(([value, label]) => {
-      const b = seg.createEl("button", { text: label, cls: "movie-heatmap-seg-btn" + (view.filter === value ? " selected" : ""), attr: { role: "radio" } });
-      b.addEventListener("click", () => {
-        view.filter = value;
-        draw();
+    if (!fixed) {
+      const seg = head.createDiv({ cls: "movie-heatmap-seg", attr: { role: "radiogroup" } });
+      [["all", "All"], ["movie", "Movies"], ["tv", "TV"], ["anime", "Anime"]].forEach(([value, label]) => {
+        const b = seg.createEl("button", { text: label, cls: "movie-heatmap-seg-btn" + (view.filter === value ? " selected" : ""), attr: { role: "radio" } });
+        b.addEventListener("click", () => {
+          view.filter = value;
+          draw();
+        });
       });
-    });
+    }
 
     // ---- period switch + navigation ----
     const bar = root.createDiv({ cls: "movie-heatmap-bar" });
@@ -551,11 +795,11 @@ function buildActivityHeatmap(container, plugin) {
     // ---- shared tooltip ----
     const body = root.createDiv({ cls: "movie-heatmap-body" });
     const tip = root.createDiv({ cls: "movie-heatmap-tip" });
-    const attachTip = (el, date, n) => {
+    const attachTip = (el, date, n, label) => {
       el.addEventListener("mouseenter", () => {
         tip.empty();
         tip.createEl("strong", { text: n ? `${n} ${n === 1 ? "activity" : "activities"}` : "No activity" });
-        tip.createSpan({ text: ` · ${fmtFull(date)}` });
+        tip.createSpan({ text: ` · ${label || fmtFull(date)}` });
         const cr = el.getBoundingClientRect();
         const rr = root.getBoundingClientRect();
         tip.addClass("is-on");
@@ -617,6 +861,59 @@ function buildActivityHeatmap(container, plugin) {
       }
     };
 
+    // All time: years run left to right, months top to bottom, one cell per month. A hundred years is still
+    // one table, just a little wider (it scrolls sideways, starting at the newest year).
+    const monthMatrix = (host) => {
+      const years = [];
+      for (let y = earliest.getFullYear(); y <= today.getFullYear(); y++) years.push(y);
+      const byMonth = new Map();
+      const byYear = new Map();
+      keys.forEach((k) => {
+        const d = parseDateKey(k);
+        const n = valueOf(k);
+        const mk = d.getFullYear() * 12 + d.getMonth();
+        byMonth.set(mk, (byMonth.get(mk) || 0) + n);
+        byYear.set(d.getFullYear(), (byYear.get(d.getFullYear()) || 0) + n);
+      });
+      // a month holds more than a day, so it gets its own colour scale (top 5% capped, like the day views)
+      const mvals = [...byMonth.values()].sort((a, b) => a - b);
+      const mcap = mvals.length ? Math.max(1, mvals[Math.min(mvals.length - 1, Math.floor(0.95 * mvals.length))]) : 1;
+      const mlevel = (n) => (n <= 0 ? 0 : Math.min(4, Math.ceil((4 * n) / mcap)));
+      const nowKey = today.getFullYear() * 12 + today.getMonth();
+
+      const wrap = host.createDiv({ cls: "movie-heatmap-matrix" });
+      const labels = wrap.createDiv({ cls: "movie-heatmap-mlabels" });
+      labels.createDiv({ cls: "movie-heatmap-mhead" });
+      HM_MONTHS.forEach((mo) => labels.createDiv({ text: mo }));
+      labels.createDiv({ cls: "movie-heatmap-mfoot", text: "Total" });
+
+      const scroll = wrap.createDiv({ cls: "movie-heatmap-scroll" });
+      const grid = scroll.createDiv({ cls: "movie-heatmap-mgrid" });
+      grid.style.gridTemplateColumns = `repeat(${years.length}, minmax(30px, 64px))`;
+      requestAnimationFrame(() => {
+        scroll.scrollLeft = scroll.scrollWidth;
+      });
+      years.forEach((y) => grid.createDiv({ cls: "movie-heatmap-mhead", text: String(y) }));
+      for (let mo = 0; mo < 12; mo++) {
+        years.forEach((y) => {
+          const mk = y * 12 + mo;
+          if (mk > nowKey) {
+            grid.createDiv({ cls: "movie-heatmap-daytile is-mcell is-blank" });
+            return;
+          }
+          const n = byMonth.get(mk) || 0;
+          const cell = grid.createDiv({ cls: `movie-heatmap-daytile is-mcell lv${mlevel(n)}`, text: n ? String(n) : "" });
+          attachTip(cell, new Date(y, mo, 1), n, `${HM_MONTHS_FULL[mo]} ${y}`);
+          cell.addEventListener("click", () => {
+            view.range = "month";
+            view.offset = nowKey - mk;
+            draw();
+          });
+        });
+      }
+      years.forEach((y) => grid.createDiv({ cls: "movie-heatmap-mfoot", text: String(byYear.get(y) || 0) }));
+    };
+
     if (view.range === "week") {
       const row = body.createDiv({ cls: "movie-heatmap-week" });
       for (let i = 0; i < 7; i++) {
@@ -645,16 +942,7 @@ function buildActivityHeatmap(container, plugin) {
     } else if (view.range === "year") {
       yearGrid(body, start, effEnd);
     } else {
-      for (let yr = today.getFullYear(); yr >= earliest.getFullYear(); yr--) {
-        const ys = new Date(yr, 0, 1);
-        const ye = yr === today.getFullYear() ? today : new Date(yr, 11, 31);
-        let yt = 0;
-        for (let d = ys; d <= ye; d = addDays(d, 1)) yt += valueOf(localDateKey(d));
-        const yh = body.createDiv({ cls: "movie-heatmap-yearhead" });
-        yh.createSpan({ cls: "movie-heatmap-yearhead-year", text: String(yr) });
-        yh.createSpan({ cls: "movie-heatmap-yearhead-total", text: `${yt} ${yt === 1 ? "activity" : "activities"}` });
-        yearGrid(body, ys, ye);
-      }
+      monthMatrix(body);
     }
 
     // ---- footer: legend ----
@@ -676,13 +964,54 @@ function buildActivityHeatmap(container, plugin) {
     tile(`${longest} day${longest === 1 ? "" : "s"}`, "Longest streak");
     tile(busiest ? fmtShort(busiest.date) : "—", busiest ? `Busiest day · ${busiest.n}` : "Busiest day");
 
-    root.createDiv({
-      cls: "movie-heatmap-note",
-      text: "Logged when you mark a movie Watched or step TV episodes, on the date you pick (today by default). Set a movie's watched date from its details.",
-    });
   };
   draw();
   return root;
+}
+
+// ---------- Stats: one window; the switch changes the whole window ----------
+function buildStatsHead(modal, scope) {
+  const head = modal.contentEl.createDiv({ cls: "mg-stats-head" });
+  head.createEl("h2", { text: "Library Stats" });
+  const seg = head.createDiv({ cls: "movie-heatmap-seg", attr: { role: "radiogroup", "aria-label": "Show stats for" } });
+  [["movie", "Movies"], ["tv", "TV"], ["anime", "Anime"]].forEach(([value, label]) => {
+    const b = seg.createEl("button", { text: label, cls: "movie-heatmap-seg-btn" + (scope === value ? " selected" : ""), attr: { role: "radio", "aria-checked": String(scope === value) } });
+    b.addEventListener("click", () => switchStatsScope(modal, value));
+  });
+}
+
+async function switchStatsScope(modal, scope) {
+  if (modal.__scope === scope || modal.__switching) return;
+  modal.__switching = true;
+  try {
+    const real = modal.plugin.__real || modal.plugin;
+    const next = new (scope === "movie" ? StatsModal : TvStatsModal)(modal.app, scope === "anime" ? real.animeCtx : real, modal.galleryEl);
+    next.contentEl = modal.contentEl;
+    next.modalEl = modal.modalEl;
+    next.close = () => modal.close();
+    modal.contentEl.empty();
+    await next.onOpen();
+  } finally {
+    modal.__switching = false;
+  }
+}
+
+// Opens the gallery tab for a stats scope and searches it (a genre, a person...).
+async function statsJump(modal, tab, query) {
+  const real = modal.plugin.__real || modal.plugin;
+  if (!real.activeTabByEl) real.activeTabByEl = new Map();
+  real.activeTabByEl.set(modal.galleryEl, tab);
+  const states = tab === "movies" ? modal.plugin.galleryStates : modal.plugin.tvGalleryStates;
+  let state = states.get(modal.galleryEl);
+  if (!state) {
+    await real.renderGallery(modal.galleryEl);
+    state = states.get(modal.galleryEl);
+  }
+  if (state) {
+    state.search = query;
+    real.renderGallery(modal.galleryEl);
+  }
+  modal.close();
 }
 
 // ---------- Detail modal: tabs, notes pane, action buttons ----------
@@ -982,20 +1311,34 @@ function buildProgressFact(modal, facts, s) {
   const totalSeasons = s.number_of_seasons || 0;
   const totalEps = s.number_of_episodes || 0;
   const prog = getShowProgress(s);
-  const ratio = totalEps ? prog.episodes / totalEps : totalSeasons ? prog.seasons / totalSeasons : null;
+  const ratio = totalEps ? prog.episodes / totalEps : !modal.plugin.__isAnime && totalSeasons ? prog.seasons / totalSeasons : null;
 
   const card = facts.createDiv({ cls: "movie-detail-fact movie-detail-fact-full movie-progress-card" });
   const head = card.createDiv({ cls: "movie-progress-head" });
   head.createDiv({ cls: "movie-detail-fact-label", text: "Progress" });
-  if (ratio !== null) head.createDiv({ cls: "movie-progress-pct", text: `${Math.round(Math.min(1, ratio) * 100)}%` });
+  if (ratio !== null) {
+    const pctEl = head.createDiv({ cls: "movie-progress-pct" });
+    pctEl.createSpan({ cls: "movie-progress-pct-num", text: `${Math.round(Math.min(1, ratio) * 100)}%` });
+    // time left = episodes still to watch x the usual episode length
+    const runtime = s.episode_runtime || 0;
+    const leftEps = totalEps - prog.episodes;
+    if (runtime && totalEps && leftEps > 0) {
+      const mins = leftEps * runtime;
+      const h = Math.floor(mins / 60), mm = mins % 60;
+      const span = h ? `${h}h${mm ? ` ${mm}m` : ""}` : `${mm}m`;
+      const open = !!modal.plugin.__isAnime && !animeTotalKnown(s);
+      pctEl.createSpan({ cls: "movie-progress-left", text: open ? `· ${span} to catch up` : `· ${span} left` });
+    }
+  }
 
   const grid = card.createDiv({ cls: "movie-progress-counters" });
+  const openEnded = !!modal.plugin.__isAnime && !animeTotalKnown(s); // still airing, final count not known
   const makeCounter = (label, unit, field, total, current) => {
     const plural = `${unit}s`;
     const cell = grid.createDiv({ cls: "movie-counter" });
     const meta = cell.createDiv({ cls: "movie-counter-meta" });
     meta.createDiv({ cls: "movie-counter-label", text: label });
-    meta.createDiv({ cls: "movie-counter-of", text: total ? `of ${total}` : "total unknown" });
+    meta.createDiv({ cls: "movie-counter-of", text: total ? (openEnded && field === "episodesWatched" ? `${total} aired so far` : `of ${total}`) : "total unknown" });
 
     const stepper = cell.createDiv({ cls: "movie-counter-stepper" });
     const minusBtn = stepper.createEl("button", {
@@ -1006,7 +1349,7 @@ function buildProgressFact(modal, facts, s) {
     const input = stepper.createEl("input", {
       type: "number",
       cls: "movie-counter-input",
-      attr: { min: "0", ...(total ? { max: String(total) } : {}), "aria-label": `${label} watched` },
+      attr: { min: "0", ...(total && !(openEnded && field === "episodesWatched") ? { max: String(total) } : {}), "aria-label": `${label} watched` },
     });
     input.value = String(current);
     const plusBtn = stepper.createEl("button", {
@@ -1018,27 +1361,51 @@ function buildProgressFact(modal, facts, s) {
     const commit = async (raw) => {
       let val = parseInt(raw, 10);
       if (isNaN(val) || val < 0) val = 0;
-      if (total && val > total) val = total;
+      const limit = field === "episodesWatched" ? s.number_of_episodes || 0 : total;
+      if (limit && val > limit) val = limit;
       input.value = String(val);
       const epsBefore = s.episodesWatched || 0;
+      const seasonsBefore = s.seasonsWatched || 0;
+      const airing = modal.plugin.__isAnime && animeIsAiring(s);
+      const wasComplete = (!airing && !!s.number_of_episodes && epsBefore >= s.number_of_episodes) || (!modal.plugin.__isAnime && !!s.number_of_seasons && seasonsBefore >= s.number_of_seasons);
       s[field] = val;
       syncShowProgress(s, field === "seasonsWatched" ? "seasons" : "episodes");
-      modal.plugin.logActivity("tv", (s.episodesWatched || 0) - epsBefore, modal._logDate || localDateKey(new Date()));
-      const doneEps = s.number_of_episodes && (s.episodesWatched || 0) >= s.number_of_episodes;
-      const doneSeasons = s.number_of_seasons && (s.seasonsWatched || 0) >= s.number_of_seasons;
+      logEpisodeSteps(modal.plugin, s, (s.episodesWatched || 0) - epsBefore, modal._logDate);
+      const doneEps = !airing && s.number_of_episodes && (s.episodesWatched || 0) >= s.number_of_episodes;
+      const doneSeasons = !modal.plugin.__isAnime && s.number_of_seasons && (s.seasonsWatched || 0) >= s.number_of_seasons;
       if (doneEps || doneSeasons) setStatus(s, "watched");
-      else if ((s.episodesWatched || 0) > 0 && statusOf(s) === "unwatched") setStatus(s, "watching");
+      else if (wasComplete && statusOf(s) === "watched") {
+        // stepped back below the end: no longer finished, so the "watched" mark comes off the heatmap too
+        if (s.watchedDate) {
+          modal.plugin.logActivity("tv", -1, s.watchedDate);
+          delete s.watchedDate;
+        }
+        setStatus(s, (s.episodesWatched || 0) > 0 ? "watching" : "unwatched");
+      } else if ((s.episodesWatched || 0) > 0 && statusOf(s) === "unwatched") setStatus(s, "watching");
       await modal.plugin.updateShow(s);
       modal.renderView();
     };
     input.addEventListener("change", () => commit(input.value));
     minusBtn.disabled = current <= 0;
     minusBtn.addEventListener("click", () => commit(current - 1));
-    plusBtn.disabled = total > 0 && current >= total;
-    plusBtn.addEventListener("click", () => commit(current + 1));
+    plusBtn.disabled = total > 0 && current >= total && !(openEnded && field === "episodesWatched");
+    plusBtn.addEventListener("click", async () => {
+      // Still airing and caught up: check whether a new episode has aired before allowing it.
+      if (openEnded && field === "episodesWatched" && total && current >= total) {
+        plusBtn.disabled = true;
+        await modal.plugin.refreshAiredCount(s, true);
+        if ((s.number_of_episodes || 0) <= current) {
+          new Notice(`Episode ${current + 1} hasn't aired yet.`);
+          plusBtn.disabled = false;
+          return;
+        }
+      }
+      commit(current + 1);
+    });
   };
-  makeCounter("Seasons", "season", "seasonsWatched", totalSeasons, prog.seasons);
+  if (!modal.plugin.__isAnime) makeCounter("Seasons", "season", "seasonsWatched", totalSeasons, prog.seasons);
   makeCounter("Episodes", "episode", "episodesWatched", totalEps, prog.episodes);
+  if (modal.plugin.__isAnime) grid.addClass("is-single");
 
   if (ratio !== null) {
     const track = card.createDiv({ cls: "movie-progress-track" });
@@ -1061,6 +1428,8 @@ function buildProgressFact(modal, facts, s) {
       modal.renderView();
     },
   });
+  const logChip = foot.querySelector(".mg-date-chip");
+  if (logChip) logChip.setAttribute("title", "Episodes you step are logged on this day in the heatmap. Pick another day to log past viewing.");
   if (custom) {
     const reset = foot.createEl("button", { cls: "mg-date-reset", text: "Back to today", attr: { type: "button" } });
     reset.addEventListener("click", () => {
@@ -1219,7 +1588,7 @@ function addSearchSettings(contentEl, plugin, peopleLabel) {
   const wrap = contentEl.createDiv({ cls: "movie-gallery-settings-toggles" });
   [
     ["searchDirector", `Search by ${peopleLabel}`],
-    ["searchCast", "Search by cast"],
+    ["searchCast", plugin.__isAnime ? "Search by voice actor" : "Search by cast"],
   ].forEach(([key, label]) => {
     const item = wrap.createEl("label", { cls: "movie-gallery-checkbox-item" });
     item.createSpan({ cls: "movie-gallery-checkbox-label", text: label });
@@ -1256,7 +1625,7 @@ function buildDataTools(contentEl, cfg) {
   const updateCtl = makeRow("Update database", cfg.updateDesc);
   const updateBtn = makeActionBtn(updateCtl, "movie-data-btn is-primary", "refresh", "Update now");
   updateBtn.addEventListener("click", async () => {
-    if (!cfg.plugin.settings.tmdbApiKey) {
+    if (!cfg.plugin.settings.tmdbApiKey && !cfg.plugin.__isAnime) {
       progressEl.setText("Set your TMDB API key first.");
       return;
     }
@@ -1318,7 +1687,7 @@ function buildDataTools(contentEl, cfg) {
   const importBtn = makeActionBtn(importCtl, "movie-data-btn", "upload", "Choose file");
   const importInput = importCtl.createEl("input", {
     type: "file",
-    attr: { accept: ".csv", style: "display:none" },
+    attr: { accept: cfg.accept || ".csv", style: "display:none" },
   });
   importBtn.addEventListener("click", () => importInput.click());
   importInput.addEventListener("change", async () => {
@@ -1350,6 +1719,43 @@ function buildDataTools(contentEl, cfg) {
     if (res.dated) parts.push(`${res.dated} watched ${res.dated === 1 ? "date" : "dates"} added to the heatmap`);
     progressEl.setText(parts.join(", ") + ".");
   });
+
+  if (cfg.extra) cfg.extra(makeRow, progressEl);
+}
+
+// Anime-only rows in Gallery Settings → Data: AniList import and MyAnimeList export.
+function buildAnimeTransferRows(plugin) {
+  return (makeRow, progressEl) => {
+    const alCtl = makeRow("Import from AniList", "Enter a public AniList username");
+    const nameInput = alCtl.createEl("input", { type: "text", cls: "movie-add-search-input", attr: { placeholder: "Username", style: "max-width:140px" } });
+    const alBtn = makeActionBtn(alCtl, "movie-data-btn", "download", "Import");
+    alBtn.addEventListener("click", async () => {
+      const name = nameInput.value.trim();
+      if (!name) return;
+      alBtn.disabled = true;
+      progressEl.setText("Fetching list from AniList...");
+      try {
+        const r = await plugin.importAnilistUser(name, (d, t) => progressEl.setText(`Importing... ${d} / ${t}`));
+        progressEl.setText(`Imported ${r.imported} from AniList${r.skipped ? `, ${r.skipped} already in library` : ""}.`);
+      } catch (e) {
+        progressEl.setText("Couldn't import: " + (e && e.message ? e.message : "AniList request failed"));
+      }
+      alBtn.disabled = false;
+    });
+
+    const xmlCtl = makeRow("Export for MyAnimeList", "Saves an XML file you can import on MyAnimeList");
+    const xmlBtn = makeActionBtn(xmlCtl, "movie-data-btn", "download", "Export XML");
+    xmlBtn.addEventListener("click", async () => {
+      xmlBtn.disabled = true;
+      try {
+        const r = await plugin.exportMalXml();
+        progressEl.setText(`Saved ${r.exported} titles to ${r.path}${r.skipped ? ` (${r.skipped} skipped: no MyAnimeList id)` : ""}.`);
+      } catch (e) {
+        progressEl.setText("Export failed.");
+      }
+      xmlBtn.disabled = false;
+    });
+  };
 }
 
 // ---------- Shared bits for views, selection, people, collections ----------
@@ -1385,13 +1791,62 @@ function personMatches(entry, person, kind) {
   return splitNames(field).some((n) => n.toLowerCase() === needle);
 }
 
+// Episode steps are logged on a day in the heatmap. The title remembers which days it logged, so undoing a step
+// takes it back from the day it was logged on (not just from today), and deleting the title can take them back.
+function logEpisodeSteps(plugin, entry, delta, dateKey) {
+  if (!delta) return;
+  const day = dateKey || localDateKey(new Date());
+  const log = (entry.activityLog = entry.activityLog || []);
+  if (delta > 0) {
+    plugin.logActivity("tv", delta, day);
+    const at = log.findIndex((x) => x.d === day);
+    const item = at >= 0 ? log.splice(at, 1)[0] : { d: day, n: 0 };
+    item.n += delta;
+    log.push(item); // the most recently touched day goes last, so it is the first to be undone
+    return;
+  }
+  let need = -delta;
+  for (let i = log.length - 1; i >= 0 && need > 0; i--) {
+    const take = Math.min(need, log[i].n);
+    plugin.logActivity("tv", -take, log[i].d);
+    log[i].n -= take;
+    need -= take;
+    if (log[i].n <= 0) log.splice(i, 1);
+  }
+  if (need > 0) plugin.logActivity("tv", -need, day); // older steps that were never recorded: take them from this day
+  if (!log.length) delete entry.activityLog;
+}
+
+// Deleting a title takes back what it added to the heatmap: its watched date and the episode days it logged.
+function forgetActivity(plugin, entry, kind) {
+  if (!entry) return;
+  if (entry.watchedDate && statusOf(entry) === "watched") plugin.logActivity(kind, -1, entry.watchedDate);
+  (entry.activityLog || []).forEach((x) => plugin.logActivity(kind, -x.n, x.d));
+}
+
+// What a re-fetch must never overwrite: the user's own status, rating, notes and progress.
+function carryUserFields(fresh, cur, isMovie) {
+  fresh.watched = cur.watched;
+  fresh.favorite = !!cur.favorite;
+  if (cur.status) fresh.status = cur.status;
+  if (cur.watchedDate) fresh.watchedDate = cur.watchedDate;
+  fresh.myRating = cur.myRating || "";
+  fresh.notes = cur.notes || "";
+  if (!isMovie) {
+    fresh.episodesWatched = cur.episodesWatched || 0;
+    fresh.seasonsWatched = cur.seasonsWatched || 0;
+    if (cur.activityLog) fresh.activityLog = cur.activityLog;
+  }
+}
+
 // Names in the details become buttons that filter the library by that person.
 function buildPeople(parent, text, role, onPick) {
   const wrap = parent.createDiv({ cls: "movie-detail-fact-value mg-people" });
   splitNames(text).forEach((name, i, arr) => {
-    const b = wrap.createEl("button", { cls: "mg-person", text: name, attr: { type: "button", title: `Show titles with ${name}` } });
+    const item = wrap.createSpan({ cls: "mg-person-item" });
+    const b = item.createEl("button", { cls: "mg-person", text: name, attr: { type: "button", title: `Show titles with ${name}` } });
     b.addEventListener("click", () => onPick(name, role));
-    if (i < arr.length - 1) wrap.createSpan({ cls: "mg-person-sep", text: "," });
+    if (i < arr.length - 1) item.createSpan({ cls: "mg-person-sep", text: "," });
   });
   return wrap;
 }
@@ -1609,6 +2064,7 @@ function parseEmbedParams(source) {
 
 class MovieGalleryPlugin extends Plugin {
   async onload() {
+    this.animeCtx = this.makeAnimeContext();
     await this.loadSettings();
     await this.loadActivity();
     await this.loadCollections();
@@ -1654,6 +2110,7 @@ class MovieGalleryPlugin extends Plugin {
     this.galleryEls?.clear();
     this.galleryStates?.clear();
     this.tvGalleryStates?.clear();
+    this.animeCtx?.tvGalleryStates?.clear();
     this.activeTabByEl?.clear();
     if (this._weekPanel) this._weekPanel.close();
     if (this._activitySaveTimer) {
@@ -1671,6 +2128,7 @@ class MovieGalleryPlugin extends Plugin {
     // Older versions kept the heatmap log inside data.json; it now has its own file.
     this._legacyActivity = data.activity && typeof data.activity === "object" ? data.activity : null;
     delete this.settings.activity;
+    ANIME_TITLE_LANG = this.settings.animeTitleLanguage || "english";
   }
 
   // Recount the movie half of the heatmap from every title's watchedDate.
@@ -1679,12 +2137,12 @@ class MovieGalleryPlugin extends Plugin {
     const movies = await this.readMovies();
     const next = {};
     Object.entries(this.activity || {}).forEach(([k, v]) => {
-      if (v && v.t) next[k] = { m: 0, t: v.t };
+      if (v && (v.t || v.a)) next[k] = { m: 0, t: v.t || 0, a: v.a || 0 };
     });
     let counted = 0;
     movies.forEach((m) => {
       if (statusOf(m) !== "watched" || !m.watchedDate) return;
-      const d = (next[m.watchedDate] = next[m.watchedDate] || { m: 0, t: 0 });
+      const d = (next[m.watchedDate] = next[m.watchedDate] || { m: 0, t: 0, a: 0 });
       d.m++;
       counted++;
     });
@@ -1744,10 +2202,10 @@ class MovieGalleryPlugin extends Plugin {
     if (!n) return;
     const key = dateKey || localDateKey(new Date());
     this.activity = this.activity || {};
-    const day = (this.activity[key] = this.activity[key] || { m: 0, t: 0 });
-    const field = kind === "movie" ? "m" : "t";
+    const day = (this.activity[key] = this.activity[key] || { m: 0, t: 0, a: 0 });
+    const field = kind === "movie" ? "m" : kind === "anime" ? "a" : "t";
     day[field] = Math.max(0, (day[field] || 0) + n); // negative n undoes a same-day mistake
-    if (!day.m && !day.t) delete this.activity[key];
+    if (!day.m && !day.t && !day.a) delete this.activity[key];
     clearTimeout(this._activitySaveTimer);
     this._activitySaveTimer = setTimeout(() => {
       this._activitySaveTimer = null;
@@ -1755,50 +2213,134 @@ class MovieGalleryPlugin extends Plugin {
     }, 600);
   }
 
-  async readMovies() {
-    const path = this.settings.dataFile;
-    const exists = await this.app.vault.adapter.exists(path);
-    if (!exists) return [];
+  // A library file that can't be read is never treated as an empty library: it is copied aside once and
+  // left untouched (see _writeLibrary), so a typo from hand-editing or a half-synced file can't wipe your titles.
+  async _readLibrary(path, label) {
+    const adapter = this.app.vault.adapter;
+    if (!(await adapter.exists(path))) {
+      if (this._unreadable) delete this._unreadable[path];
+      return [];
+    }
+    let content = "";
     try {
-      const content = await this.app.vault.adapter.read(path);
-      return content.trim() ? JSON.parse(content) : [];
+      content = await adapter.read(path);
+      const data = content.trim() ? JSON.parse(content) : [];
+      if (!Array.isArray(data)) throw new Error("it does not hold a list");
+      if (this._unreadable) delete this._unreadable[path];
+      return data;
     } catch (e) {
-      console.error("TerroTrack: failed to read data file", e);
-      new Notice("TerroTrack: could not read " + path);
+      console.error(`TerroTrack: failed to read ${label} data file`, e);
+      this._unreadable = this._unreadable || {};
+      if (this._unreadable[path] !== content) {
+        this._unreadable[path] = content;
+        try {
+          await adapter.write(path + ".bak", content);
+        } catch (err) {}
+        new Notice(`TerroTrack: couldn't read ${path} (${e.message}). A copy was kept as ${path}.bak, and the file won't be overwritten until it can be read again. Fix it, or delete it to start fresh.`, 12000);
+      }
       return [];
     }
   }
 
-  async writeMovies(movies) {
-    const path = this.settings.dataFile;
-    await this.app.vault.adapter.write(path, JSON.stringify(movies, null, 2));
+  async _writeLibrary(path, list) {
+    if (this._unreadable && Object.prototype.hasOwnProperty.call(this._unreadable, path)) {
+      new Notice(`TerroTrack: not saving, because ${path} can't be read. Fix or delete it first.`);
+      return false;
+    }
+    await this.app.vault.adapter.write(path, JSON.stringify(list, null, 2));
+    return true;
   }
 
-  async addMovie(movie) {
-    const movies = await this.readMovies();
-    if (movies.some((m) => m.id === movie.id)) {
-      new Notice(`"${movie.title}" is already in the gallery.`);
-      return;
-    }
-    movies.push(movie);
-    await this.writeMovies(movies);
-    new Notice(`Added "${movie.title}"`);
+  async readMovies() {
+    return this._readLibrary(this.settings.dataFile, "movie");
+  }
+
+  async writeMovies(movies) {
+    return this._writeLibrary(this.settings.dataFile, movies);
+  }
+
+  // Library files are changed one step at a time, so every read-modify-write starts from what the one before it saved.
+  _serial(fn) {
+    const real = this.__real || this;
+    const run = (real._writeChain || Promise.resolve()).then(fn, fn);
+    real._writeChain = run.catch(() => {});
+    return run;
+  }
+
+  // Swap in freshly fetched entries, keeping the user's own fields from what is saved now (not from when the fetch began).
+  _applyRefreshed(freshById, isMovie) {
+    return this._serial(async () => {
+      const list = isMovie ? await this.readMovies() : await this.readShows();
+      let n = 0;
+      list.forEach((cur, i) => {
+        const fresh = freshById.get(cur.id);
+        if (!fresh) return;
+        carryUserFields(fresh, cur, isMovie);
+        list[i] = fresh;
+        n++;
+      });
+      if (n) {
+        if (isMovie) await this.writeMovies(list);
+        else await this.writeShows(list);
+      }
+      return n;
+    });
+  }
+
+  // Background fetches save only the fields they changed, onto the newest saved entry. (Saving the whole entry
+  // could bring back older progress if the title was changed while the fetch was running.)
+  async patchShow(before, entry, after) {
+    const patch = {};
+    new Set([...Object.keys(before), ...Object.keys(entry)]).forEach((k) => {
+      if (JSON.stringify(before[k]) !== JSON.stringify(entry[k])) patch[k] = entry[k];
+    });
+    if (!Object.keys(patch).length) return;
+    let latest = null;
+    await this._serial(async () => {
+      const list = await this.readShows();
+      const i = list.findIndex((x) => x.id === entry.id);
+      if (i === -1) return;
+      Object.assign(list[i], patch);
+      if (after) after(list[i]);
+      await this.writeShows(list);
+      latest = list[i];
+    });
+    if (!latest) return;
+    if (!this.__isAnime) this.syncTitleNote(latest, "tv");
     this.refreshGalleries();
   }
 
+  async addMovie(movie) {
+    const added = await this._serial(async () => {
+      const movies = await this.readMovies();
+      if (movies.some((m) => m.id === movie.id)) return false;
+      movies.push(movie);
+      await this.writeMovies(movies);
+      return true;
+    });
+    new Notice(added ? `Added "${movie.title}"` : `"${movie.title}" is already in the gallery.`);
+    if (added) this.refreshGalleries();
+  }
+
   async removeMovie(id) {
-    const movies = await this.readMovies();
-    const filtered = movies.filter((m) => m.id !== id);
-    await this.writeMovies(filtered);
+    let gone = null;
+    await this._serial(async () => {
+      const movies = await this.readMovies();
+      gone = movies.find((m) => m.id === id);
+      await this.writeMovies(movies.filter((m) => m.id !== id));
+    });
+    forgetActivity(this, gone, "movie");
     await this.dropFromCollections("movie", [id]);
     this.refreshGalleries();
   }
 
   async updateMovie(updatedMovie) {
-    const movies = await this.readMovies();
-    const idx = movies.findIndex((m) => m.id === updatedMovie.id);
-    if (idx !== -1) movies[idx] = updatedMovie;
-    await this.writeMovies(movies);
+    await this._serial(async () => {
+      const movies = await this.readMovies();
+      const idx = movies.findIndex((m) => m.id === updatedMovie.id);
+      if (idx !== -1) movies[idx] = updatedMovie;
+      await this.writeMovies(movies);
+    });
     this.syncTitleNote(updatedMovie, "movie");
     this.refreshGalleries();
   }
@@ -1869,49 +2411,668 @@ class MovieGalleryPlugin extends Plugin {
     }
   }
 
-  async readShows() {
-    const path = this.settings.tvDataFile;
-    const exists = await this.app.vault.adapter.exists(path);
-    if (!exists) return [];
-    try {
-      const content = await this.app.vault.adapter.read(path);
-      return content.trim() ? JSON.parse(content) : [];
-    } catch (e) {
-      console.error("TerroTrack: failed to read TV data file", e);
-      new Notice("TerroTrack: could not read " + path);
-      return [];
+  // ---------- Anime ----------
+  async readAnime() {
+    const list = await this._readLibrary(this.settings.animeDataFile, "anime");
+    list.forEach((e) => {
+      if (e.title_english || e.title_romaji || e.title_native) e.name = chooseAnimeTitle(e) || e.name;
+    });
+    return list;
+  }
+
+  async writeAnime(list) {
+    return this._writeLibrary(this.settings.animeDataFile, list);
+  }
+
+  // The anime tab reuses the whole TV screen. This view of the plugin behaves the
+  // same except that it reads and writes anime.json and talks to AniList / MyAnimeList.
+  makeAnimeContext() {
+    const plugin = this;
+    const states = new Map();
+    const over = {
+      __isAnime: true,
+      __real: plugin,
+      tvGalleryStates: states,
+      readShows: () => plugin.readAnime(),
+      writeShows: (list) => plugin.writeAnime(list),
+      addShow: async (show) => {
+        const added = await plugin._serial(async () => {
+          const list = await plugin.readAnime();
+          if (list.some((x) => x.id === show.id || (show.mal_id && x.mal_id === show.mal_id))) return false;
+          list.push(show);
+          await plugin.writeAnime(list);
+          return true;
+        });
+        new Notice(added ? `Added "${show.name}"` : `"${show.name}" is already in your anime library.`);
+        if (added) plugin.refreshGalleries();
+      },
+      removeShow: async (id) => {
+        let gone = null;
+        await plugin._serial(async () => {
+          const list = await plugin.readAnime();
+          gone = list.find((x) => x.id === id);
+          await plugin.writeAnime(list.filter((x) => x.id !== id));
+        });
+        forgetActivity(plugin, gone, "anime");
+        await plugin.dropFromCollections("anime", [id]);
+        plugin.refreshGalleries();
+      },
+      updateShow: async (entry) => {
+        await plugin._serial(async () => {
+          const list = await plugin.readAnime();
+          const idx = list.findIndex((x) => x.id === entry.id);
+          if (idx !== -1) list[idx] = entry;
+          await plugin.writeAnime(list);
+        });
+        plugin.refreshGalleries();
+      },
+      backfillSeasonEpisodes: (s) => plugin.backfillAnimeExtras(s),
+      fetchShowDetails: (id, fallback) => plugin.fetchAnimeDetails(id, fallback),
+      fetchSimilarShows: (id) => plugin.fetchSimilarAnime(id),
+      thisWeekItems: () => plugin.animeWeekItems(),
+      importShows: (text, name, cb) => plugin.importAnimeFile(text, name, cb),
+      logActivity: (kind, n, dateKey) => plugin.logActivity(kind === "movie" ? "movie" : "anime", n, dateKey),
+    };
+    return new Proxy(plugin, {
+      get(target, prop) {
+        if (Object.prototype.hasOwnProperty.call(over, prop)) return over[prop];
+        return Reflect.get(target, prop, target);
+      },
+    });
+  }
+
+  async anilistRequest(query, variables, raw) {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const limit = ANILIST_PER_MINUTE;
+    this._alTimes = (this._alTimes || []).filter((t) => Date.now() - t < 60000);
+    while (this._alTimes.length >= limit) {
+      await sleep(Math.max(50, this._alTimes[0] + 60000 - Date.now() + 50));
+      this._alTimes = this._alTimes.filter((t) => Date.now() - t < 60000);
     }
+    for (let attempt = 0; attempt < 2; attempt++) {
+      this._alTimes.push(Date.now());
+      const res = await requestUrl({
+        url: ANILIST_URL,
+        method: "POST",
+        contentType: "application/json",
+        body: JSON.stringify({ query, variables }),
+        throw: false,
+      });
+      if (res.status === 429 && attempt === 0) {
+        const wait = parseInt((res.headers && (res.headers["retry-after"] || res.headers["Retry-After"])) || "5", 10) || 5;
+        await sleep(Math.min(wait, 15) * 1000);
+        continue;
+      }
+      if (res.status >= 400) {
+        let detail = "";
+        try {
+          detail = (res.json && res.json.errors && res.json.errors[0] && res.json.errors[0].message) || "";
+        } catch (e) {}
+        throw new Error(res.status === 429 ? "AniList is limiting requests right now. Try again in a minute." : `AniList error ${res.status}${detail ? ": " + detail : ""}`);
+      }
+      const json = res.json;
+      if (!json || (json.errors && !json.data)) throw new Error((json && json.errors && json.errors[0] && json.errors[0].message) || "AniList error");
+      return raw ? { data: json.data, errors: json.errors || null } : json.data;
+    }
+  }
+
+  // MyAnimeList data: the official API when a client ID is set (usually quicker), otherwise Jikan.
+  malActive() {
+    return !!(this.settings.malClientId && this.settings.malClientId.trim());
+  }
+
+  async malRequest(path) {
+    const res = await requestUrl({ url: MAL_URL + path, headers: { "X-MAL-CLIENT-ID": this.settings.malClientId.trim() }, throw: false });
+    if (res.status === 401 || res.status === 403) throw new Error("MyAnimeList rejected the client ID");
+    if (res.status >= 400) throw new Error(`MyAnimeList error ${res.status}`);
+    return res.json;
+  }
+
+  async malSearchCandidates(q) {
+    if (this.malActive()) {
+      if (q.trim().length < 3) return []; // MyAnimeList needs at least 3 characters
+      const j = await this.malRequest(`/anime?q=${encodeURIComponent(q)}&limit=10&fields=${MAL_FIELDS}`);
+      return ((j && j.data) || []).map((x) => x.node).filter((n) => n && n.nsfw !== "black").map(animeFromMalApi);
+    }
+    const r = await this.jikanRequest("/anime?" + new URLSearchParams({ q, limit: "8", sfw: "true" }).toString());
+    return ((r && r.data) || []).map(animeFromJikan);
+  }
+
+  async malAnimeCandidate(id) {
+    if (this.malActive()) return animeFromMalApi(await this.malRequest(`/anime/${id}?fields=${MAL_FIELDS}`));
+    const r = await this.jikanRequest(`/anime/${id}`);
+    return r && r.data ? animeFromJikan(r.data) : null;
+  }
+
+  async jikanRequest(path) {
+    const res = await Promise.race([
+      requestUrl({ url: JIKAN_URL + path, throw: false }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("MyAnimeList (Jikan) didn't answer in time")), JIKAN_TIMEOUT_MS)),
+    ]);
+    if (res.status >= 400) throw new Error(`MyAnimeList error ${res.status}`);
+    return res.json;
+  }
+
+  // Alternate names, related titles (sequels, prequels...) and voice cast.
+  async fetchAnimeExtras(entry) {
+    try {
+      if (entry.anilist_id) {
+        const gql = `query($id: Int) { Media(id: $id, type: ANIME) { title { romaji english native } synonyms relations { edges { relationType(version: 2) node { id idMal type format title { romaji english } startDate { year } episodes coverImage { large } } } } } }`;
+        const d = (await this.anilistRequest(gql, { id: entry.anilist_id })).Media;
+        if (d) {
+          const t = d.title || {};
+          entry.title_english = t.english || entry.title_english || "";
+          entry.title_romaji = t.romaji || entry.title_romaji || "";
+          entry.title_native = t.native || entry.title_native || "";
+          entry.synonyms = d.synonyms && d.synonyms.length ? d.synonyms : entry.synonyms || [];
+          entry.related = ((d.relations && d.relations.edges) || [])
+            .filter((e) => e.node && e.node.type === "ANIME" && ANIME_RELATIONS[e.relationType])
+            .sort((a, b) => ANIME_RELATION_ORDER.indexOf(a.relationType) - ANIME_RELATION_ORDER.indexOf(b.relationType))
+            .map((e) => ({
+              id: e.node.id,
+              anilist_id: e.node.id,
+              mal_id: e.node.idMal || null,
+              title: e.node.title.english || e.node.title.romaji || "",
+              format: normAnimeFormat(e.node.format),
+              year: e.node.startDate && e.node.startDate.year ? String(e.node.startDate.year) : "",
+              episodes: e.node.episodes || null,
+              relation: ANIME_RELATIONS[e.relationType],
+              poster: (e.node.coverImage && e.node.coverImage.large) || "",
+            }));
+          entry.extras_v = 1;
+        }
+      } else if (entry.mal_id && this.malActive()) {
+        const j = await this.malRequest(`/anime/${entry.mal_id}?fields=related_anime`);
+        entry.related = ((j && j.related_anime) || [])
+          .filter((r) => r.node && MAL_RELATIONS[r.relation_type])
+          .map((r) => ({ id: ANIME_MAL_OFFSET + r.node.id, anilist_id: null, mal_id: r.node.id, title: r.node.title, format: "", year: "", episodes: null, relation: MAL_RELATIONS[r.relation_type], poster: (r.node.main_picture && (r.node.main_picture.medium || r.node.main_picture.large)) || "" }));
+        entry.extras_v = 1;
+      } else if (entry.mal_id) {
+        const rel = await this.jikanRequest(`/anime/${entry.mal_id}/relations`);
+        entry.related = ((rel && rel.data) || [])
+          .flatMap((r) => (r.entry || []).filter((x) => x.type === "anime").map((x) => ({ r, x })))
+          .map(({ r, x }) => ({ id: ANIME_MAL_OFFSET + x.mal_id, anilist_id: null, mal_id: x.mal_id, title: x.name, format: "", year: "", episodes: null, relation: String(r.relation || "Related"), poster: "" }));
+        entry.extras_v = 1;
+      }
+    } catch (e) {
+      /* leave the entry as it is; the details window retries later */
+    }
+    await this.fetchAnimeCast(entry);
+    return entry;
+  }
+
+  // NOTE: AniList silently returns no voice roles unless `node { id }` is selected on each character
+  // edge, so every cast query below selects it.
+  // Japanese voice actors of the main characters. Tries AniList's current field, then the
+  // older one, then MyAnimeList. It only records "checked" after a real answer, so a rate limit
+  // or network error is retried next time instead of being remembered as "no cast".
+  async fetchAnimeCast(entry) {
+    const names = [];
+    const images = {};
+    const characters = {};
+    const add = (n, img, character) => {
+      if (!n) return;
+      names.push(n);
+      if (img) images[n] = img;
+      if (character && !characters[n]) characters[n] = character;
+    };
+    let reached = !entry.anilist_id && !entry.mal_id; // nothing to look up
+    let lastError = "";
+    if (entry.anilist_id) {
+      const frags = ["voiceActorRoles(language: JAPANESE) { voiceActor { name { full } image { medium } } }", "voiceActors(language: JAPANESE) { name { full } image { medium } }"];
+      for (const frag of frags) {
+        try {
+          const gql = `query($id: Int) { Media(id: $id, type: ANIME) { characters(page: 1, perPage: 12, sort: [ROLE, RELEVANCE, ID]) { edges { node { id name { full } } ${frag} } } } }`;
+          const r = await this.anilistRequest(gql, { id: entry.anilist_id }, true);
+          const d = r.data || {};
+          const partial = r.errors && r.errors[0] && r.errors[0].message;
+          if (partial && !(d.Media && d.Media.characters && d.Media.characters.edges)) throw new Error(partial);
+          reached = true;
+          (((d.Media && d.Media.characters && d.Media.characters.edges) || [])).forEach((e) => {
+            const character = e.node && e.node.name && e.node.name.full;
+            (e.voiceActorRoles || []).forEach((r) => r.voiceActor && r.voiceActor.name && add(r.voiceActor.name.full, r.voiceActor.image && r.voiceActor.image.medium, character));
+            (e.voiceActors || []).forEach((v) => v && v.name && add(v.name.full, v.image && v.image.medium, character));
+          });
+          if (names.length) break;
+        } catch (e) {
+          lastError = (e && e.message) || "AniList error";
+        }
+      }
+    }
+    if (!names.length && entry.mal_id) {
+      try {
+        const chars = await this.jikanRequest(`/anime/${entry.mal_id}/characters`);
+        reached = true;
+        ((chars && chars.data) || []).slice(0, 14).forEach((c) => (c.voice_actors || []).forEach((v) => /japanese/i.test(v.language || "") && v.person && add(v.person.name, v.person.images && v.person.images.jpg && v.person.images.jpg.image_url, c.character && c.character.name)));
+      } catch (e) {
+        lastError = lastError || (e && e.message) || "MyAnimeList error";
+      }
+    }
+    if (names.length) {
+      const unique = Array.from(new Set(names)).slice(0, 12);
+      entry.cast = unique.join(", ");
+      entry.cast_people = unique.map((n) => ({ name: n, image: images[n] || "", character: characters[n] || "" }));
+      entry.cast_checked = Date.now();
+      entry.cast_v = 4;
+      delete entry.cast_error;
+    } else if (reached) {
+      entry.cast_checked = Date.now();
+      entry.cast_v = 4;
+      delete entry.cast_error;
+    } else {
+      entry.cast_error = lastError || "no connection";
+      delete entry.cast_checked;
+    }
+    return entry;
+  }
+
+  // Re-reads how many episodes of a still-airing title have aired (and whether it has finished).
+  async refreshAiredCount(s, force) {
+    if (!s.anilist_id) return false;
+    if (!force && s.aired_checked && Date.now() - s.aired_checked < 30 * 60000) return false;
+    const snap = { ...s };
+    try {
+      const d = await this.anilistRequest("query($id: Int) { Media(id: $id, type: ANIME) { status episodes nextAiringEpisode { episode } } }", { id: s.anilist_id });
+      const m = d.Media;
+      if (!m) return false;
+      const aired = m.nextAiringEpisode && m.nextAiringEpisode.episode ? m.nextAiringEpisode.episode - 1 : m.episodes || s.episodes_aired || 0;
+      const count = m.episodes || aired || s.number_of_episodes || 0;
+      const before = s.number_of_episodes || 0;
+      s.aired_checked = Date.now();
+      s.show_status = ANIME_STATUS_MAP[m.status] || s.show_status;
+      s.total_known = !!m.episodes;
+      s.episodes_aired = aired || s.episodes_aired || 0;
+      if (count !== before) {
+        s.number_of_episodes = count;
+        s.season_episodes = count ? [count] : [];
+      }
+      await this.patchShow(snap, s);
+      return count > before;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  async backfillAnimeExtras(s) {
+    if (!s.anilist_id && !s.mal_id) return false;
+    const needCast = animeNeedsCast(s);
+    if (s.extras_v && !needCast) return false;
+    if (!s.extras_v) await this.fetchAnimeExtras(s);
+    else await this.fetchAnimeCast(s);
+    return true;
+  }
+
+  // "Similar" for anime: AniList recommendations (MyAnimeList's as a fallback).
+  async fetchSimilarAnime(id) {
+    const alId = typeof id === "number" && id < ANIME_MAL_OFFSET ? id : null;
+    const malId = typeof id === "number" && id >= ANIME_MAL_OFFSET ? id - ANIME_MAL_OFFSET : null;
+    try {
+      if (alId) {
+        const gql = `query($id: Int) { Media(id: $id, type: ANIME) { recommendations(sort: RATING_DESC, perPage: 12) { nodes { mediaRecommendation { ${ANILIST_MEDIA_FIELDS} } } } } }`;
+        const d = await this.anilistRequest(gql, { id: alId });
+        return (((d.Media && d.Media.recommendations && d.Media.recommendations.nodes) || []).map((n) => n.mediaRecommendation).filter((m) => m && !m.isAdult).slice(0, 8)).map(animeToDiscoverItem);
+      }
+      if (malId && this.malActive()) {
+        const j = await this.malRequest(`/anime/${malId}?fields=recommendations`);
+        return ((j && j.recommendations) || []).slice(0, 8).map((x) => ({
+          id: ANIME_MAL_OFFSET + x.node.id,
+          name: x.node.title,
+          first_air_date: "",
+          vote_average: 0,
+          poster_url: (x.node.main_picture && (x.node.main_picture.medium || x.node.main_picture.large)) || "",
+          mal_id: x.node.id,
+        }));
+      }
+      if (malId) {
+        const r = await this.jikanRequest(`/anime/${malId}/recommendations`);
+        return ((r && r.data) || []).slice(0, 8).map((x) => ({
+          id: ANIME_MAL_OFFSET + x.entry.mal_id,
+          name: x.entry.title,
+          first_air_date: "",
+          vote_average: 0,
+          poster_url: (x.entry.images && x.entry.images.jpg && x.entry.images.jpg.image_url) || "",
+          mal_id: x.entry.mal_id,
+        }));
+      }
+    } catch (e) {
+      console.error("TerroTrack: failed to fetch similar anime", e);
+    }
+    return [];
+  }
+
+  // Episodes airing within a week either side of today, for the titles you're watching.
+  async animeWeekItems() {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const key = (d) => localDateKey(d);
+    const todayKey = key(today);
+    const fromKey = key(addDays(today, -7));
+    const toKey = key(addDays(today, 7));
+    const inWindow = (d) => !!d && d >= fromKey && d <= toKey;
+    const list = await this.readAnime();
+    const items = [];
+    list.forEach((s) => {
+      if (statusOf(s) === "unwatched" && inWindow(s.first_air_date)) items.push({ group: "release", kind: "tv", e: s, date: s.first_air_date, premiere: true });
+    });
+    const watching = list.filter((s) => statusOf(s) === "watching" && s.anilist_id);
+    if (watching.length) {
+      const nowSec = Math.floor(Date.now() / 1000);
+      let sched = new Map();
+      try {
+        sched = await this.animeSchedule(watching.map((s) => s.anilist_id), nowSec - 7 * 86400, nowSec + 7 * 86400);
+      } catch (e) {
+        console.warn("TerroTrack: couldn't load the anime schedule", e);
+      }
+      watching.forEach((s) => {
+        const eps = (sched.get(s.anilist_id) || []).slice().sort((a, b) => a.airingAt - b.airingAt);
+        const aired = eps.filter((e) => e.airingAt <= nowSec);
+        const next = eps.find((e) => e.airingAt > nowSec);
+        const last = aired[aired.length - 1];
+        if (last) {
+          const behind = last.episode - (s.episodesWatched || 0);
+          if (behind > 0) items.push({ group: "episode", kind: "tv", e: s, date: key(new Date(last.airingAt * 1000)), ep: { s: 1, e: last.episode, name: "" }, behind });
+        }
+        if (next) items.push({ group: "episode", kind: "tv", e: s, date: key(new Date(next.airingAt * 1000)), ep: { s: 1, e: next.episode, name: "" }, upcoming: true });
+      });
+    }
+    items.forEach((it) => (it.out = it.date <= todayKey && (it.group === "release" || it.behind > 0)));
+    return { items, todayKey };
+  }
+
+  async animeSchedule(ids, from, to) {
+    this._animeSchedCache = this._animeSchedCache || new Map();
+    const ck = `${ids.slice().sort().join(",")}|${Math.floor(from / 3600)}`;
+    const hit = this._animeSchedCache.get(ck);
+    if (hit && Date.now() - hit.t < 30 * 60 * 1000) return hit.data;
+    this._animeSchedInflight = this._animeSchedInflight || new Map();
+    if (this._animeSchedInflight.has(ck)) return this._animeSchedInflight.get(ck); // a rebuild asked again: share the lookup
+    const job = (async () => {
+      const out = new Map();
+      const gql = `query($ids: [Int], $from: Int, $to: Int, $p: Int) { Page(page: $p, perPage: 50) { pageInfo { hasNextPage } airingSchedules(mediaId_in: $ids, airingAt_greater: $from, airingAt_lesser: $to, sort: TIME) { mediaId episode airingAt } } }`;
+      for (let p = 1; p <= 6; p++) {
+        const d = await this.anilistRequest(gql, { ids, from, to, p });
+        ((d.Page && d.Page.airingSchedules) || []).forEach((x) => {
+          if (!out.has(x.mediaId)) out.set(x.mediaId, []);
+          out.get(x.mediaId).push(x);
+        });
+        if (!(d.Page && d.Page.pageInfo && d.Page.pageInfo.hasNextPage)) break;
+      }
+      this._animeSchedCache.set(ck, { t: Date.now(), data: out });
+      return out;
+    })();
+    this._animeSchedInflight.set(ck, job);
+    try {
+      return await job;
+    } finally {
+      this._animeSchedInflight.delete(ck);
+    }
+  }
+
+  // Searches both sites at once. AniList answers first, so those results are
+  // shown immediately (onPartial) and MyAnimeList is merged in when it arrives.
+  async searchAnime(query, onPartial) {
+    this._animeSearchCache = this._animeSearchCache || new Map();
+    const cacheKey = query.trim().toLowerCase();
+    const hit = this._animeSearchCache.get(cacheKey);
+    if (hit && Date.now() - hit.t < 10 * 60 * 1000) return hit.data;
+
+    const gql = `query($s: String) { Page(perPage: 10) { media(search: $s, type: ANIME, isAdult: false, sort: SEARCH_MATCH) { ${ANILIST_MEDIA_FIELDS} } } }`;
+    const alP = this.anilistRequest(gql, { s: query }).then((d) => (d.Page.media || []).map(animeFromAniList));
+    const jkP = Promise.race([
+      this.malSearchCandidates(query),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("MyAnimeList timed out")), 6000)),
+    ]);
+
+    const norm = (x) => String(x || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const build = (al, jk) => {
+      const jkByMal = new Map(jk.map((x) => [x.mal_id, x]));
+      const usedMal = new Set();
+      const out = [];
+      al.forEach((x) => {
+        const m = x.mal_id ? jkByMal.get(x.mal_id) : null;
+        if (m) usedMal.add(m.mal_id);
+        out.push(mergeAnimeCandidates(x, m || null));
+      });
+      jk.forEach((x) => {
+        if (usedMal.has(x.mal_id)) return;
+        if (out.some((o) => o.mal_id === x.mal_id || (norm(o.name) === norm(x.name) && o.year === x.year))) return;
+        out.push(mergeAnimeCandidates(null, x));
+      });
+      return out.slice(0, 12).map((c) => {
+        const entry = animeCandidateToEntry(c);
+        return {
+          id: entry.id,
+          name: c.name,
+          first_air_date: c.first_air_date,
+          vote_average: parseFloat(c.rating) || 0,
+          poster_url: c.poster,
+          found_on: c.found_on,
+          _entry: entry,
+        };
+      });
+    };
+
+    if (onPartial) alP.then((al) => onPartial(build(al, []))).catch(() => {});
+    const [a, j] = await Promise.allSettled([alP, jkP]);
+    if (a.status === "rejected" && j.status === "rejected") throw a.reason;
+    const data = build(a.status === "fulfilled" ? a.value : [], j.status === "fulfilled" ? j.value : []);
+    this._animeSearchCache.set(cacheKey, { t: Date.now(), data });
+    return data;
+  }
+
+  // Full details for one title (used when refreshing an entry).
+  async fetchAnimeDetails(id, fallback = {}) {
+    if (fallback._entry) return this.fetchAnimeExtras({ ...fallback._entry });
+    const alId = fallback.anilist_id || (typeof id === "number" && id < ANIME_MAL_OFFSET ? id : null);
+    const malId = fallback.mal_id || (typeof id === "number" && id >= ANIME_MAL_OFFSET ? id - ANIME_MAL_OFFSET : null);
+    let al = null;
+    let jk = null;
+    let alError = null;
+    if (alId || malId) {
+      try {
+        const gql = `query($id: Int, $mal: Int) { Media(id: $id, idMal: $mal, type: ANIME) { ${ANILIST_MEDIA_FIELDS} } }`;
+        const data = await this.anilistRequest(gql, alId ? { id: alId } : { mal: malId });
+        if (data.Media) al = animeFromAniList(data.Media);
+      } catch (e) {
+        alError = e;
+      }
+    }
+    // A title that came from AniList keeps AniList's data: if AniList can't be reached, stop
+    // instead of replacing it with MyAnimeList's version.
+    if (!al && alId && fallback.id != null) throw alError || new Error("AniList didn't return this title");
+    const mid = (al && al.mal_id) || malId;
+    const alComplete = !!(al && al.poster && al.overview && al.genres && al.studios && al.year && al.rating);
+    if (mid && !alComplete) {
+      try {
+        jk = await this.malAnimeCandidate(mid);
+      } catch (e) {}
+    }
+    if (!al && !jk) throw alError || new Error("Couldn't reach AniList or MyAnimeList");
+    const entry = animeCandidateToEntry(mergeAnimeCandidates(al, jk));
+    if (fallback.id != null) {
+      entry.id = fallback.id;
+      // never lose something the entry already had
+      Object.keys(fallback).forEach((k) => {
+        if (k === "_entry") return;
+        const v = entry[k];
+        const empty = v === "" || v === null || v === undefined || (Array.isArray(v) && !v.length);
+        const had = fallback[k] !== "" && fallback[k] !== null && fallback[k] !== undefined && !(Array.isArray(fallback[k]) && !fallback[k].length);
+        if (empty && had) entry[k] = fallback[k];
+      });
+    }
+    return this.fetchAnimeExtras(entry);
+  }
+
+  // Import: a MyAnimeList XML export, or a TerroTrack backup CSV.
+  async importAnimeFile(text, filename, onProgress) {
+    const trimmed = String(text || "").trim();
+    if (trimmed.startsWith("<")) return this.importMalXml(trimmed, onProgress);
+    const rows = this.parseCsv(trimmed);
+    if (rows.length && Object.keys(rows[0]).some((h) => /^const$/i.test(h) || /letterboxd/i.test(h))) {
+      return { imported: 0, skipped: 0, failed: 0, format: "other", error: "unsupported" };
+    }
+    return MovieGalleryPlugin.prototype.importShows.call(this.animeCtx, text, filename, onProgress);
+  }
+
+  async importMalXml(text, onProgress) {
+    const doc = new DOMParser().parseFromString(text, "text/xml");
+    if (doc.querySelector("parsererror")) return { imported: 0, skipped: 0, failed: 0, format: "mal", error: "unsupported" };
+    const nodes = Array.from(doc.getElementsByTagName("anime"));
+    const get = (el, tag) => {
+      const n = el.getElementsByTagName(tag)[0];
+      return n ? (n.textContent || "").trim() : "";
+    };
+    const existing = await this.readAnime();
+    const known = new Set(existing.map((x) => x.mal_id).filter(Boolean));
+    let imported = 0;
+    let skipped = 0;
+    let failed = 0;
+    for (let i = 0; i < nodes.length; i++) {
+      const el = nodes[i];
+      const malId = parseInt(get(el, "series_animedb_id"), 10);
+      if (!malId || known.has(malId)) {
+        skipped++;
+        continue;
+      }
+      let entry = null;
+      try {
+        const cand = await this.malAnimeCandidate(malId);
+        if (cand) entry = animeCandidateToEntry(mergeAnimeCandidates(null, cand));
+        await new Promise((res) => setTimeout(res, this.malActive() ? 200 : 400));
+      } catch (e) {}
+      if (!entry) {
+        const title = get(el, "series_title");
+        if (!title) {
+          failed++;
+          continue;
+        }
+        const eps = parseInt(get(el, "series_episodes"), 10) || null;
+        entry = animeCandidateToEntry({ mal_id: malId, name: title, episodes: eps, rating: "", rating_source: "" });
+      }
+      const st = get(el, "my_status").toLowerCase();
+      const code = /^[1-6]$/.test(st) ? { 1: "watching", 2: "completed", 3: "on-hold", 4: "dropped", 6: "plan" }[st] : st;
+      if (/complete/.test(code)) Object.assign(entry, statusFields("watched"));
+      else if (/watching|hold/.test(code)) Object.assign(entry, statusFields("watching"));
+      else if (/drop/.test(code)) Object.assign(entry, statusFields("dropped"));
+      const score = parseFloat(get(el, "my_score"));
+      if (score > 0) entry.myRating = String(Math.min(10, Math.round(score)));
+      entry.episodesWatched = parseInt(get(el, "my_watched_episodes"), 10) || 0;
+      if (entry.watched && entry.number_of_episodes) entry.episodesWatched = entry.number_of_episodes;
+      syncShowProgress(entry, "episodes");
+      existing.push(entry);
+      known.add(malId);
+      imported++;
+      if (onProgress) onProgress(i + 1, nodes.length);
+    }
+    await this.writeAnime(existing);
+    this.refreshGalleries();
+    return { imported, skipped, failed, format: "mal" };
+  }
+
+  // Import a public AniList list by username.
+  async importAnilistUser(username, onProgress) {
+    const gql = `query($u: String) { MediaListCollection(userName: $u, type: ANIME) { lists { entries { status score(format: POINT_10_DECIMAL) progress media { ${ANILIST_MEDIA_FIELDS} } } } } }`;
+    const data = await this.anilistRequest(gql, { u: username });
+    const entries = ((data.MediaListCollection && data.MediaListCollection.lists) || []).flatMap((l) => l.entries || []);
+    const existing = await this.readAnime();
+    const known = new Set(existing.map((x) => x.anilist_id).filter(Boolean));
+    let imported = 0;
+    let skipped = 0;
+    entries.forEach((e, i) => {
+      const c = animeFromAniList(e.media);
+      if (known.has(c.al_id)) {
+        skipped++;
+        return;
+      }
+      const entry = animeCandidateToEntry(c);
+      const st = e.status;
+      if (st === "COMPLETED") Object.assign(entry, statusFields("watched"));
+      else if (st === "CURRENT" || st === "REPEATING" || st === "PAUSED") Object.assign(entry, statusFields("watching"));
+      else if (st === "DROPPED") Object.assign(entry, statusFields("dropped"));
+      if (e.score > 0) entry.myRating = String(Math.min(10, Math.round(e.score * 2) / 2));
+      entry.episodesWatched = e.progress || 0;
+      if (entry.watched && entry.number_of_episodes) entry.episodesWatched = entry.number_of_episodes;
+      syncShowProgress(entry, "episodes");
+      existing.push(entry);
+      known.add(c.al_id);
+      imported++;
+      if (onProgress) onProgress(i + 1, entries.length);
+    });
+    await this.writeAnime(existing);
+    this.refreshGalleries();
+    return { imported, skipped, total: entries.length };
+  }
+
+  // Export in the MyAnimeList XML format (titles without a MyAnimeList id can't be exported).
+  async exportMalXml() {
+    const list = await this.readAnime();
+    const esc = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const statusName = (a) => (a.watched ? "Completed" : a.status === "dropped" ? "Dropped" : a.status === "watching" ? "Watching" : "Plan to Watch");
+    let used = 0;
+    const blocks = list
+      .filter((a) => a.mal_id)
+      .map((a) => {
+        used++;
+        return (
+          "  <anime>\n" +
+          `    <series_animedb_id>${a.mal_id}</series_animedb_id>\n` +
+          `    <series_title><![CDATA[${String(a.name).replace(/]]>/g, "]] >")}]]></series_title>\n` +
+          `    <my_watched_episodes>${a.episodesWatched || 0}</my_watched_episodes>\n` +
+          "    <my_start_date>0000-00-00</my_start_date>\n" +
+          "    <my_finish_date>0000-00-00</my_finish_date>\n" +
+          `    <my_score>${Math.round(parseFloat(a.myRating) || 0)}</my_score>\n` +
+          `    <my_status>${esc(statusName(a))}</my_status>\n` +
+          "    <update_on_import>1</update_on_import>\n" +
+          "  </anime>\n"
+        );
+      });
+    const xml =
+      '<?xml version="1.0" encoding="UTF-8" ?>\n<myanimelist>\n  <myinfo><user_export_type>1</user_export_type></myinfo>\n' + blocks.join("") + "</myanimelist>\n";
+    const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    const filename = `anime-mal-export-${timestamp}.xml`;
+    await this.app.vault.adapter.write(filename, xml);
+    return { path: filename, exported: used, skipped: list.length - used };
+  }
+
+  async readShows() {
+    return this._readLibrary(this.settings.tvDataFile, "TV");
   }
 
   async writeShows(shows) {
-    const path = this.settings.tvDataFile;
-    await this.app.vault.adapter.write(path, JSON.stringify(shows, null, 2));
+    return this._writeLibrary(this.settings.tvDataFile, shows);
   }
 
   async addShow(show) {
-    const shows = await this.readShows();
-    if (shows.some((s) => s.id === show.id)) {
-      new Notice(`"${show.name}" is already in your TV library.`);
-      return;
-    }
-    shows.push(show);
-    await this.writeShows(shows);
-    new Notice(`Added "${show.name}"`);
-    this.refreshGalleries();
+    const added = await this._serial(async () => {
+      const shows = await this.readShows();
+      if (shows.some((s) => s.id === show.id)) return false;
+      shows.push(show);
+      await this.writeShows(shows);
+      return true;
+    });
+    new Notice(added ? `Added "${show.name}"` : `"${show.name}" is already in your TV library.`);
+    if (added) this.refreshGalleries();
   }
 
   async removeShow(id) {
-    const shows = await this.readShows();
-    await this.writeShows(shows.filter((s) => s.id !== id));
+    let gone = null;
+    await this._serial(async () => {
+      const shows = await this.readShows();
+      gone = shows.find((s) => s.id === id);
+      await this.writeShows(shows.filter((s) => s.id !== id));
+    });
+    forgetActivity(this, gone, "tv");
     await this.dropFromCollections("tv", [id]);
     this.refreshGalleries();
   }
 
   async updateShow(updatedShow) {
-    const shows = await this.readShows();
-    const idx = shows.findIndex((s) => s.id === updatedShow.id);
-    if (idx !== -1) shows[idx] = updatedShow;
-    await this.writeShows(shows);
+    await this._serial(async () => {
+      const shows = await this.readShows();
+      const idx = shows.findIndex((s) => s.id === updatedShow.id);
+      if (idx !== -1) shows[idx] = updatedShow;
+      await this.writeShows(shows);
+    });
     this.syncTitleNote(updatedShow, "tv");
     this.refreshGalleries();
   }
@@ -2010,23 +3171,11 @@ class MovieGalleryPlugin extends Plugin {
   }
 
   async refreshShowEntry(id) {
-    const shows = await this.readShows();
-    const idx = shows.findIndex((s) => s.id === id);
-    if (idx === -1) return null;
-    const s = shows[idx];
-
+    const s = (await this.readShows()).find((x) => x.id === id);
+    if (!s) return null;
     try {
       const fresh = await this.fetchShowDetails(s.id, s);
-      fresh.watched = s.watched;
-      fresh.favorite = !!s.favorite;
-      if (s.status) fresh.status = s.status;
-      if (s.watchedDate) fresh.watchedDate = s.watchedDate;
-      fresh.myRating = s.myRating || "";
-      fresh.notes = s.notes || "";
-      fresh.episodesWatched = s.episodesWatched || 0;
-      fresh.seasonsWatched = s.seasonsWatched || 0;
-      shows[idx] = fresh;
-      await this.writeShows(shows);
+      await this._applyRefreshed(new Map([[s.id, fresh]]), false);
       this.refreshGalleries();
       return fresh;
     } catch (e) {
@@ -2039,33 +3188,20 @@ class MovieGalleryPlugin extends Plugin {
   async refreshAllShows(onProgress) {
     const shows = await this.readShows();
     const total = shows.length;
-    let updated = 0;
-
+    const fresh = new Map();
     for (let i = 0; i < shows.length; i++) {
       const s = shows[i];
       if (typeof s.id !== "number") continue;
-
       try {
-        const fresh = await this.fetchShowDetails(s.id, s);
-        fresh.watched = s.watched;
-        fresh.favorite = !!s.favorite;
-        if (s.status) fresh.status = s.status;
-        if (s.watchedDate) fresh.watchedDate = s.watchedDate;
-        fresh.myRating = s.myRating || "";
-        fresh.notes = s.notes || "";
-        fresh.episodesWatched = s.episodesWatched || 0;
-        fresh.seasonsWatched = s.seasonsWatched || 0;
-        shows[i] = fresh;
-        updated++;
+        fresh.set(s.id, await this.fetchShowDetails(s.id, s));
       } catch (e) {
         console.error("TerroTrack: failed to refresh", s.name, e);
       }
-
       if (onProgress) onProgress(i + 1, total);
       await new Promise((resolve) => setTimeout(resolve, 300));
     }
-
-    await this.writeShows(shows);
+    // merged into what is saved now, so changes made while this was running are kept
+    const updated = await this._applyRefreshed(fresh, false);
     this.refreshGalleries();
     return updated;
   }
@@ -2095,7 +3231,7 @@ class MovieGalleryPlugin extends Plugin {
     const shows = await this.readShows();
     const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
     const ext = format === "csv" ? "csv" : "txt";
-    const filename = `tvshows-backup-${timestamp}.${ext}`;
+    const filename = `${this.__isAnime ? "anime" : "tvshows"}-backup-${timestamp}.${ext}`;
     const content = format === "csv" ? this.buildShowsCsvBackup(shows) : this.buildShowsTxtBackup(shows);
 
     if (Platform.isDesktopApp) {
@@ -2344,26 +3480,16 @@ class MovieGalleryPlugin extends Plugin {
   }
 
   async refreshMovieEntry(id) {
-    const movies = await this.readMovies();
-    const idx = movies.findIndex((m) => m.id === id);
-    if (idx === -1) return null;
-    const m = movies[idx];
-
+    const mv = (await this.readMovies()).find((x) => x.id === id);
+    if (!mv) return null;
     try {
-      const fresh = await this.fetchMovieDetails(m.id, m);
-      fresh.watched = m.watched;
-      fresh.favorite = !!m.favorite;
-      if (m.status) fresh.status = m.status;
-      if (m.watchedDate) fresh.watchedDate = m.watchedDate;
-      fresh.myRating = m.myRating || "";
-      fresh.notes = m.notes || "";
-      movies[idx] = fresh;
-      await this.writeMovies(movies);
+      const fresh = await this.fetchMovieDetails(mv.id, mv);
+      await this._applyRefreshed(new Map([[mv.id, fresh]]), true);
       this.refreshGalleries();
       return fresh;
     } catch (e) {
-      console.error("TerroTrack: failed to refresh", m.title, e);
-      new Notice(`Couldn't refresh "${m.title}".`);
+      console.error("TerroTrack: failed to refresh", mv.title, e);
+      new Notice(`Couldn't refresh "${mv.title}".`);
       return null;
     }
   }
@@ -2371,31 +3497,20 @@ class MovieGalleryPlugin extends Plugin {
   async refreshAllMovies(onProgress) {
     const movies = await this.readMovies();
     const total = movies.length;
-    let updated = 0;
-
+    const fresh = new Map();
     for (let i = 0; i < movies.length; i++) {
-      const m = movies[i];
-      if (typeof m.id !== "number") continue;
-
+      const mv = movies[i];
+      if (typeof mv.id !== "number") continue;
       try {
-        const fresh = await this.fetchMovieDetails(m.id, m);
-        fresh.watched = m.watched;
-        fresh.favorite = !!m.favorite;
-        if (m.status) fresh.status = m.status;
-        if (m.watchedDate) fresh.watchedDate = m.watchedDate;
-        fresh.myRating = m.myRating || "";
-        fresh.notes = m.notes || "";
-        movies[i] = fresh;
-        updated++;
+        fresh.set(mv.id, await this.fetchMovieDetails(mv.id, mv));
       } catch (e) {
-        console.error("TerroTrack: failed to refresh", m.title, e);
+        console.error("TerroTrack: failed to refresh", mv.title, e);
       }
-
       if (onProgress) onProgress(i + 1, total);
       await new Promise((resolve) => setTimeout(resolve, 300));
     }
-
-    await this.writeMovies(movies);
+    // merged into what is saved now, so changes made while this was running are kept
+    const updated = await this._applyRefreshed(fresh, true);
     this.refreshGalleries();
     return updated;
   }
@@ -2599,6 +3714,12 @@ class MovieGalleryPlugin extends Plugin {
 
   // Placeholder follows the "Search by director / cast" options in Gallery Settings.
   searchPlaceholder(peopleLabel) {
+    if (this.__isAnime) {
+      const parts = ["title"];
+      if (this.settings.searchDirector !== false) parts.push("studio");
+      if (this.settings.searchCast !== false) parts.push("voice actor");
+      return parts.length === 1 ? "Search title..." : `Search ${parts.slice(0, -1).join(", ")}${parts.length > 2 ? "," : ""} or ${parts[parts.length - 1]}...`;
+    }
     const parts = ["title"];
     if (this.settings.searchDirector !== false) parts.push(peopleLabel);
     if (this.settings.searchCast !== false) parts.push("cast");
@@ -2685,30 +3806,6 @@ class MovieGalleryPlugin extends Plugin {
       "L " + points.join(" L ") +
       ` L ${x(values.length - 1).toFixed(1)},${baselineY.toFixed(1)} Z`;
 
-    const dotIndexes = [
-      0,
-      Math.floor(values.length * 0.25),
-      Math.floor(values.length * 0.5),
-      Math.floor(values.length * 0.75),
-      values.length - 1,
-    ];
-    const uniqueDotIndexes = [...new Set(dotIndexes)];
-
-    const dots = uniqueDotIndexes
-      .map((i) => {
-        const isLast = i === values.length - 1;
-        const cx = x(i).toFixed(1);
-        const cy = y(values[i]).toFixed(1);
-        if (isLast) {
-          return `<circle cx="${cx}" cy="${cy}" r="3" fill="#eab308" stroke="#fff" stroke-width="1.5" />`;
-        }
-        return `<circle cx="${cx}" cy="${cy}" r="2" fill="#eab308" stroke="#1e1e1e" stroke-width="1.2" />`;
-      })
-      .join("");
-
-    const firstLabel = "1st";
-    const lastLabel = `${allValues.length}th`;
-    const lastLabelX = x(values.length - 1).toFixed(1);
     const gradId = "mg-trend-grad-" + Math.random().toString(36).slice(2, 8);
 
     return `
@@ -2991,11 +4088,28 @@ class MovieGalleryPlugin extends Plugin {
   refreshGalleries() {
     for (const el of this.galleryEls) {
       if (document.body.contains(el)) {
-        this.renderGallery(el);
+        // Don't rebuild the page under someone who is typing: wait until they leave the field.
+        const a = document.activeElement;
+        if (a && el.contains(a) && isEditable(a)) {
+          if (!a.__mgDeferred) {
+            a.__mgDeferred = true;
+            a.addEventListener(
+              "blur",
+              () => {
+                a.__mgDeferred = false;
+                if (document.body.contains(el)) this.renderGallery(el);
+              },
+              { once: true }
+            );
+          }
+        } else {
+          this.renderGallery(el);
+        }
       } else {
         this.galleryEls.delete(el);
         this.galleryStates.delete(el);
         this.tvGalleryStates.delete(el);
+        if (this.animeCtx) this.animeCtx.tvGalleryStates.delete(el);
       }
     }
   }
@@ -3183,6 +4297,10 @@ class MovieGalleryPlugin extends Plugin {
   }
 
   async addFromDiscover(item, media) {
+    if (media === "anime") {
+      await this.animeCtx.addShow(await this.fetchAnimeExtras({ ...item._entry }));
+      return;
+    }
     const title = discoverTitle(item, media);
     const year = (discoverDate(item, media) || "????").slice(0, 4);
     if (media === "movie") {
@@ -3220,7 +4338,7 @@ class MovieGalleryPlugin extends Plugin {
 
     const bar = headerWrap.createDiv({ cls: "mg-discover-bar" });
     const seg = bar.createDiv({ cls: "movie-gallery-segmented" });
-    [["movie", "Movies"], ["tv", "TV Shows"]].forEach(([value, label]) => {
+    [["movie", "Movies"], ["tv", "TV Shows"], ["anime", "Anime"]].forEach(([value, label]) => {
       const b = seg.createEl("button", { cls: "movie-gallery-segment", text: label });
       b.toggleClass("selected", state.media === value);
       b.addEventListener("click", () => {
@@ -3228,8 +4346,8 @@ class MovieGalleryPlugin extends Plugin {
         this.renderGallery(stateKey);
       });
     });
-    bar.createDiv({ cls: "mg-discover-hint", text: "Powered by TMDB" });
-    const refresh = bar.createEl("button", { cls: "mg-discover-refresh", attr: { "aria-label": "Refresh" } });
+    bar.createDiv({ cls: "mg-discover-spacer" });
+    const refresh = bar.createEl("button", { cls: "mg-discover-refresh", attr: { "aria-label": "Refresh", title: "Refresh" } });
     refresh.innerHTML = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg><span>Refresh</span>';
     refresh.addEventListener("click", () => {
       this._discoverCache = new Map();
@@ -3237,7 +4355,8 @@ class MovieGalleryPlugin extends Plugin {
     });
 
     const body = el.createDiv({ cls: "mg-discover" });
-    if (!this.settings.tmdbApiKey) {
+    el.createDiv({ cls: "mg-discover-foot", text: state.media === "anime" ? "Powered by AniList" : "Powered by TMDB" });
+    if (!this.settings.tmdbApiKey && state.media !== "anime") {
       const empty = body.createDiv({ cls: "mg-discover-empty" });
       empty.createDiv({ cls: "mg-discover-empty-title", text: "Add your TMDB API key to start discovering" });
       empty.createDiv({ cls: "mg-discover-empty-sub", text: "Open Settings → TerroTrack and paste your key. Trending, new releases, upcoming titles and personal picks will appear here." });
@@ -3245,7 +4364,7 @@ class MovieGalleryPlugin extends Plugin {
     }
 
     const media = state.media;
-    const library = media === "movie" ? await this.readMovies() : await this.readShows();
+    const library = media === "movie" ? await this.readMovies() : media === "anime" ? await this.readAnime() : await this.readShows();
     const libIds = new Set(library.map((e) => e.id));
     const rows = [];
     const addRow = (title, subtitle, load, opts = {}) => {
@@ -3253,17 +4372,77 @@ class MovieGalleryPlugin extends Plugin {
       rows.push(this.buildDiscoverRow(host, { title, subtitle, media, libIds, load, ...opts }));
     };
 
-    addRow("Picked for you", "Based on what you've rated and watched", () => this._forYou(media), { kind: "foryou" });
+    if (media === "anime") {
+      addRow("Picked for you", "Based on what you've rated", () => this._forYou("anime"), { kind: "foryou" });
+      addRow("Trending this week", "What everyone is watching", () => this.discoverAnimeFeed("trending"));
+      addRow("Airing now", "Popular shows with new episodes", () => this.discoverAnimeFeed("airing"));
+      addRow("Coming soon", "New series on the way", () => this.discoverAnimeFeed("upcoming"), { showDate: true });
+      return;
+    }
+    if (media === "movie") {
+      addRow("Upcoming", "Releases on the way", () => this.discoverFeed(media, "upcoming"), { showDate: true });
+      addRow("Picked for you", "Based on what you've rated and watched", () => this._forYou(media), { kind: "foryou" });
+      addRow("Trending this week", "What everyone is watching", () => this.discoverFeed(media, "trending"));
+      return;
+    }
     addRow("Trending this week", "What everyone is watching", () => this.discoverFeed(media, "trending"));
-    addRow(media === "movie" ? "In theaters now" : "On the air", media === "movie" ? "New releases" : "Currently airing new episodes", () => this.discoverFeed(media, "new"), { showDate: false });
-    addRow("Coming soon", media === "movie" ? "Upcoming releases" : "New series on the way", () => this.discoverFeed(media, "upcoming"), { showDate: true });
+    addRow("On the air", "Currently airing new episodes", () => this.discoverFeed(media, "new"), { showDate: false });
+    addRow("Coming soon", "New series on the way", () => this.discoverFeed(media, "upcoming"), { showDate: true });
+    addRow("Picked for you", "Based on what you've rated and watched", () => this._forYou(media), { kind: "foryou" });
+  }
+
+  // Anime discover rows come straight from AniList (no TMDB key needed).
+  async discoverAnimeFeed(kind) {
+    this._discoverCache = this._discoverCache || new Map();
+    const key = "anime:" + kind;
+    const hit = this._discoverCache.get(key);
+    if (hit && Date.now() - hit.t < DISCOVER_TTL) return hit.data;
+    const args = {
+      trending: "sort: TRENDING_DESC",
+      airing: "status: RELEASING, sort: POPULARITY_DESC",
+      upcoming: "status: NOT_YET_RELEASED, sort: POPULARITY_DESC",
+    }[kind];
+    const gql = `query { Page(perPage: 24) { media(type: ANIME, isAdult: false, ${args}) { ${ANILIST_MEDIA_FIELDS} } } }`;
+    const data = await this.anilistRequest(gql, {});
+    let items = (data.Page.media || []).map(animeToDiscoverItem);
+    if (kind === "upcoming") {
+      const dated = items.filter((x) => x.first_air_date).sort((a, b) => a.first_air_date.localeCompare(b.first_air_date));
+      items = dated.concat(items.filter((x) => !x.first_air_date));
+    }
+    this._discoverCache.set(key, { t: Date.now(), data: items });
+    return items;
+  }
+
+  async discoverAnimeForYou() {
+    const lib = await this.readAnime();
+    const liked = lib.filter((a) => parseFloat(a.myRating) >= 7 || statusOf(a) === "watched");
+    const weights = {};
+    liked.forEach((a) => {
+      const w = parseFloat(a.myRating) || 7;
+      String(a.genres || "").split(",").map((g) => g.trim()).filter(Boolean).forEach((g) => (weights[g] = (weights[g] || 0) + w));
+    });
+    const top = Object.entries(weights).sort((x, y) => y[1] - x[1]).slice(0, 3).map(([g]) => g);
+    if (!top.length) return { empty: true, picks: [], topGenres: [] };
+    const gql = `query($g: [String]) { Page(perPage: 40) { media(type: ANIME, isAdult: false, genre_in: $g, sort: POPULARITY_DESC, format_in: [TV, MOVIE]) { ${ANILIST_MEDIA_FIELDS} } } }`;
+    const data = await this.anilistRequest(gql, { g: top });
+    const have = new Set(lib.map((a) => a.anilist_id).filter(Boolean));
+    const picks = (data.Page.media || [])
+      .filter((m) => !have.has(m.id))
+      .slice(0, 16)
+      .map((m) => {
+        const item = animeToDiscoverItem(m);
+        const shared = (m.genres || []).filter((g) => top.includes(g)).slice(0, 2);
+        if (shared.length) item._reason = `Because you like ${shared.join(" & ")}`;
+        return item;
+      });
+    return { empty: false, picks, topGenres: top, because: null };
   }
 
   async _forYou(media) {
     this._forYouCache = this._forYouCache || new Map();
     const hit = this._forYouCache.get(media);
     if (hit && Date.now() - hit.t < DISCOVER_TTL) return hit.data;
-    const data = await this.discoverForYou(media);
+    const data = media === "anime" ? await this.discoverAnimeForYou() : await this.discoverForYou(media);
     this._forYouCache.set(media, { t: Date.now(), data });
     return data;
   }
@@ -3335,7 +4514,8 @@ class MovieGalleryPlugin extends Plugin {
     const date = discoverDate(item, media);
     const card = track.createDiv({ cls: "mg-card", attr: { tabindex: "0", role: "button", "aria-label": title } });
     const poster = card.createDiv({ cls: "mg-card-poster" });
-    if (item.poster_path) poster.createEl("img", { attr: { src: `${POSTER_BASE}${item.poster_path}`, alt: title, loading: "lazy" } });
+    const posterSrc = item.poster_url || (item.poster_path ? `${POSTER_BASE}${item.poster_path}` : "");
+    if (posterSrc) poster.createEl("img", { attr: { src: posterSrc, alt: title, loading: "lazy" } });
     else poster.createDiv({ cls: "mg-card-noposter", text: title });
     if (item.vote_average) poster.createSpan({ cls: "mg-card-rating", text: `★ ${item.vote_average.toFixed(1)}` });
 
@@ -3432,7 +4612,7 @@ class MovieGalleryPlugin extends Plugin {
         if (Array.isArray(parsed)) {
           this.collections = parsed
             .filter((c) => c && c.id && typeof c.name === "string")
-            .map((c) => ({ ...c, items: Array.isArray(c.items) ? c.items.filter((x) => x && (x.t === "movie" || x.t === "tv")) : [] }));
+            .map((c) => ({ ...c, items: Array.isArray(c.items) ? c.items.filter((x) => x && (x.t === "movie" || x.t === "tv" || x.t === "anime")) : [] }));
         }
       } else {
         await this.saveCollections();
@@ -3499,29 +4679,68 @@ class MovieGalleryPlugin extends Plugin {
 
   // ---------------- Bulk actions ----------------
   async bulkApply(kind, ids, mutate) {
-    const list = kind === "movie" ? await this.readMovies() : await this.readShows();
     const touched = [];
-    list.forEach((e) => {
-      if (ids.has(e.id)) {
-        mutate(e);
-        touched.push(e);
-      }
+    await this._serial(async () => {
+      const list = kind === "movie" ? await this.readMovies() : await this.readShows();
+      list.forEach((e) => {
+        if (ids.has(e.id)) {
+          mutate(e);
+          touched.push(e);
+        }
+      });
+      if (kind === "movie") await this.writeMovies(list);
+      else await this.writeShows(list);
     });
-    if (kind === "movie") await this.writeMovies(list);
-    else await this.writeShows(list);
     touched.forEach((e) => this.syncTitleNote(e, kind));
     this.refreshGalleries();
     return touched.length;
   }
 
   async bulkDelete(kind, ids) {
-    const list = kind === "movie" ? await this.readMovies() : await this.readShows();
-    const next = list.filter((e) => !ids.has(e.id));
-    if (kind === "movie") await this.writeMovies(next);
-    else await this.writeShows(next);
+    let removed = 0;
+    let gone = [];
+    await this._serial(async () => {
+      const list = kind === "movie" ? await this.readMovies() : await this.readShows();
+      const next = list.filter((e) => !ids.has(e.id));
+      gone = list.filter((e) => ids.has(e.id));
+      removed = list.length - next.length;
+      if (kind === "movie") await this.writeMovies(next);
+      else await this.writeShows(next);
+    });
+    gone.forEach((e) => forgetActivity(this, e, kind));
     await this.dropFromCollections(kind, [...ids]);
     this.refreshGalleries();
-    return list.length - next.length;
+    return removed;
+  }
+
+  // Re-fetch the selected titles from their source. Progress, ratings, notes and status are kept.
+  async refreshSelected(kind, ids, onProgress) {
+    const isMovie = kind === "movie";
+    if (!this.settings.tmdbApiKey && (isMovie || !this.__isAnime)) {
+      new Notice("Set your TMDB API key first.");
+      return null;
+    }
+    const wanted = new Set(ids);
+    const targets = (isMovie ? await this.readMovies() : await this.readShows()).filter((e) => wanted.has(e.id));
+    const total = targets.length;
+    const fresh = new Map();
+    let done = 0;
+    let failed = 0;
+    for (const e of targets) {
+      try {
+        if (typeof e.id !== "number") throw new Error("custom entry");
+        fresh.set(e.id, isMovie ? await this.fetchMovieDetails(e.id, e) : await this.fetchShowDetails(e.id, e));
+      } catch (err) {
+        failed++;
+        console.error("TerroTrack: failed to refresh", e.title || e.name, err);
+      }
+      done++;
+      if (onProgress) onProgress(done, total);
+      if (!this.__isAnime) await new Promise((r) => setTimeout(r, 250));
+    }
+    const updated = await this._applyRefreshed(fresh, isMovie);
+    this.refreshGalleries();
+    return { updated, failed };
   }
 
   buildBulkBar(el, state, kind, ctx) {
@@ -3573,11 +4792,26 @@ class MovieGalleryPlugin extends Plugin {
       ctx.rerenderSection();
     });
 
+    const upd = bar.createEl("button", { cls: "mg-bulk-btn" });
+    upd.innerHTML = `${ACTION_ICONS.refresh}<span>Update</span>`;
+    upd.addEventListener("click", async () => {
+      if (!state.selected.size) return;
+      const label = upd.querySelector("span");
+      upd.disabled = true;
+      const r = await this.refreshSelected(kind, [...state.selected], (d, t) => label.setText(`Updating ${d}/${t}…`));
+      upd.disabled = false;
+      label.setText("Update");
+      if (!r) return;
+      new Notice(`Updated ${r.updated} title${r.updated === 1 ? "" : "s"}${r.failed ? `, ${r.failed} couldn't be refreshed` : ""}`);
+      state.selected.clear();
+      ctx.rerenderSection();
+    });
+
     const col = bar.createEl("button", { cls: "mg-bulk-btn" });
     col.innerHTML = `${MG_ICONS.folderPlus}<span>Collection</span>`;
     col.addEventListener("click", () => {
       if (!state.selected.size) return;
-      new CollectionPickerModal(this.app, this, [...state.selected].map((id) => ({ t: kind, id }))).open();
+      new CollectionPickerModal(this.app, this, [...state.selected].map((id) => ({ t: this.__isAnime ? "anime" : kind, id }))).open();
     });
 
     const del = bar.createEl("button", { cls: "mg-bulk-btn is-danger" });
@@ -3696,7 +4930,7 @@ class MovieGalleryPlugin extends Plugin {
 
   // Click a name in the details: show only that person's titles.
   filterByPerson(kind, name, role) {
-    const tab = kind === "movie" ? "movies" : "tv";
+    const tab = kind === "movie" ? "movies" : kind === "anime" ? "anime" : "tv";
     for (const el of [...this.galleryEls]) {
       if (!document.body.contains(el) || el.__terroEmbed) continue;
       el.__pendingPerson = { kind, person: { name, role } };
@@ -3719,7 +4953,7 @@ class MovieGalleryPlugin extends Plugin {
   appendPersonChip(countEl, state, rerender) {
     if (!state.person) return;
     const chip = countEl.createSpan({ cls: "mg-person-chip" });
-    chip.createSpan({ text: `${state.person.role === "cast" ? "Cast" : state.person.role === "creator" ? "Creator" : "Director"}: ${state.person.name}` });
+    chip.createSpan({ text: `${state.person.role === "cast" ? "Cast" : state.person.role === "creator" ? (this.__isAnime ? "Studio" : "Creator") : "Director"}: ${state.person.name}` });
     const x = chip.createEl("button", { cls: "mg-person-chip-x", attr: { "aria-label": "Clear" } });
     x.innerHTML = MG_ICONS.x;
     x.addEventListener("click", () => {
@@ -3730,7 +4964,7 @@ class MovieGalleryPlugin extends Plugin {
 
   // ---------------- Notes in your vault ----------------
   notePathFor(entry, kind) {
-    const clean = (s) => String(s || "").replace(/[\\/:*?"<>|#^\[\]]/g, "").replace(/\s+/g, " ").trim();
+    const clean = (s) => String(s || "").replace(/[\\/:*?"<>|#^[\]]/g, "").replace(/\s+/g, " ").trim();
     const title = kind === "movie" ? entry.title : entry.name;
     const name = `${clean(title)}${entry.year ? ` (${entry.year})` : ""}`.trim() || `Title ${entry.id}`;
     const folder = (this.settings.notesFolder || "TerroTrack Notes").replace(/^\/+|\/+$/g, "");
@@ -3893,13 +5127,13 @@ class MovieGalleryPlugin extends Plugin {
       el.createDiv({ cls: "movie-gallery-empty", text: "Nothing matches this filter yet." });
       return;
     }
-    const openDetails = ({ e, k }) => (k === "movie" ? new MovieDetailModal(this.app, this, e) : new TvDetailModal(this.app, this, e)).open();
+    const openDetails = ({ e, k }) => (k === "movie" ? new MovieDetailModal(this.app, this, e) : new TvDetailModal(this.app, k === "anime" ? this.animeCtx : this, e)).open();
 
     if (String(p.view || "grid").toLowerCase() === "list") {
       const st = { selected: new Set(), selecting: false, sortField: "", sortDir: "desc" };
       out.forEach((x) => {
         const sub = el.createDiv({ cls: "mg-embed-list-wrap" });
-        this.renderListView(sub, [x.e], x.k, st, { rerenderSection: () => {}, activate: () => openDetails(x), save: (e) => (x.k === "movie" ? this.updateMovie(e) : this.updateShow(e)) });
+        this.renderListView(sub, [x.e], x.k, st, { rerenderSection: () => {}, activate: () => openDetails(x), save: (e) => (x.k === "movie" ? this.updateMovie(e) : x.k === "anime" ? this.animeCtx.updateShow(e) : this.updateShow(e)) });
       });
       return;
     }
@@ -3908,7 +5142,7 @@ class MovieGalleryPlugin extends Plugin {
     const px = sizes[String(p.size || "medium").toLowerCase()] || 120;
     grid.style.gridTemplateColumns = p.columns ? `repeat(${parseInt(p.columns, 10) || 6}, 1fr)` : `repeat(auto-fill, minmax(${px}px, 1fr))`;
     out.forEach((x) => {
-      const { e, k } = x;
+      const { e } = x;
       const card = grid.createDiv({ cls: "movie-gallery-card" + ` status-${statusOf(e)}` });
       const wrap = card.createDiv({ cls: "movie-gallery-poster-wrap" });
       const url = getPosterUrl(e);
@@ -3939,16 +5173,18 @@ class MovieGalleryPlugin extends Plugin {
 
     const movies = await this.readMovies();
     const shows = await this.readShows();
+    const animeList = await this.readAnime();
     const lookup = new Map();
     movies.forEach((m) => lookup.set(`movie:${m.id}`, { e: m, k: "movie" }));
     shows.forEach((s) => lookup.set(`tv:${s.id}`, { e: s, k: "tv" }));
+    animeList.forEach((a) => lookup.set(`anime:${a.id}`, { e: a, k: "anime" }));
     const resolve = (c) => c.items.map((x) => lookup.get(`${x.t}:${x.id}`)).filter(Boolean);
     const rerender = () => this.renderGallery(stateKey);
 
     const bar = headerWrap.createDiv({ cls: "mg-col-bar" });
     const body = el.createDiv({ cls: "mg-col-body" });
     const nameOf = ({ e, k }) => (k === "movie" ? e.title : e.name);
-    const openDetails = ({ e, k }) => (k === "movie" ? new MovieDetailModal(this.app, this, e) : new TvDetailModal(this.app, this, e)).open();
+    const openDetails = ({ e, k }) => (k === "movie" ? new MovieDetailModal(this.app, this, e) : new TvDetailModal(this.app, k === "anime" ? this.animeCtx : this, e)).open();
 
     if (!state.open) {
       bar.createDiv({ cls: "mg-col-hint", text: cols.length ? `${cols.length} collection${cols.length === 1 ? "" : "s"}` : "Group movies and shows into your own lists." });
@@ -4016,7 +5252,7 @@ class MovieGalleryPlugin extends Plugin {
       const card = grid.createDiv({ cls: "movie-gallery-card" + ` status-${statusOf(e)}` });
       const wrap = card.createDiv({ cls: "movie-gallery-poster-wrap" });
       wrap.createEl("img", { attr: { src: getPosterUrl(e), alt: nameOf(x), loading: "lazy" } });
-      wrap.createSpan({ cls: "mg-col-kind", text: k === "movie" ? "Movie" : "TV" });
+      wrap.createSpan({ cls: "mg-col-kind", text: k === "movie" ? "Movie" : k === "anime" ? "Anime" : "TV" });
       const st = statusOf(e);
       if (st !== "unwatched") wrap.createSpan({ cls: `movie-gallery-poster-badge movie-gallery-poster-badge-${st}`, text: STATUS_BADGE[st] });
       const rm = wrap.createEl("button", { cls: "mg-col-remove", attr: { "aria-label": "Remove from collection", title: "Remove from collection" } });
@@ -4058,7 +5294,7 @@ class MovieGalleryPlugin extends Plugin {
   }
 
   // Everything in your library that needs attention within a week either side of today.
-  async thisWeekItems() {
+  async thisWeekItems(scope) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const key = (d) => localDateKey(d);
@@ -4067,8 +5303,8 @@ class MovieGalleryPlugin extends Plugin {
     const toKey = key(addDays(today, 7));
     const inWindow = (d) => !!d && d >= fromKey && d <= toKey;
 
-    const movies = await this.readMovies();
-    const shows = await this.readShows();
+    const movies = scope === "tv" ? [] : await this.readMovies();
+    const shows = scope === "movie" ? [] : await this.readShows();
     const items = [];
 
     // Movies still on To Watch: refresh dates that are near, so a delayed release isn't missed
@@ -4115,29 +5351,36 @@ class MovieGalleryPlugin extends Plugin {
   }
 
   async addEpisode(s) {
-    const total = s.number_of_episodes || 0;
+    let total = s.number_of_episodes || 0;
     const before = s.episodesWatched || 0;
-    if (total && before >= total) return;
+    if (total && before >= total) {
+      // a still-airing title may have a new episode since the last check
+      if (this.__isAnime && !animeTotalKnown(s)) {
+        await this.refreshAiredCount(s, true);
+        total = s.number_of_episodes || 0;
+      }
+      if (total && before >= total) return;
+    }
     s.episodesWatched = before + 1;
     syncShowProgress(s, "episodes");
-    this.logActivity("tv", 1);
-    const doneEps = total && s.episodesWatched >= total;
-    const doneSeasons = s.number_of_seasons && (s.seasonsWatched || 0) >= s.number_of_seasons;
+    logEpisodeSteps(this, s, 1);
+    const doneEps = !(this.__isAnime && animeIsAiring(s)) && total && s.episodesWatched >= total;
+    const doneSeasons = !this.__isAnime && s.number_of_seasons && (s.seasonsWatched || 0) >= s.number_of_seasons;
     if (doneEps || doneSeasons) setStatus(s, "watched");
     else if (statusOf(s) === "unwatched") setStatus(s, "watching");
     await this.updateShow(s);
   }
 
-  buildWeekButton(group) {
+  buildWeekButton(group, scope) {
     const btn = group.createEl("button", {
       cls: "movie-gallery-group-btn mg-week-btn",
-      attr: { "aria-label": "This week", title: "This week: new episodes and releases in your library" },
+      attr: { "aria-label": "This week", title: scope === "movie" ? "This week: movie releases from your To Watch" : "This week: new episodes and premieres in your library" },
     });
     btn.innerHTML = MG_ICONS.bell;
     const badge = btn.createSpan({ cls: "mg-week-badge is-hidden" });
-    btn.addEventListener("click", () => this.openWeekPanel(btn));
+    btn.addEventListener("click", () => this.openWeekPanel(btn, scope));
     // fill in the count without blocking the toolbar
-    this.thisWeekItems()
+    this.thisWeekItems(scope)
       .then(({ items }) => {
         if (!btn.isConnected) return;
         const n = items.filter((x) => x.out).length;
@@ -4147,7 +5390,7 @@ class MovieGalleryPlugin extends Plugin {
       .catch(() => {});
   }
 
-  async openWeekPanel(anchor) {
+  async openWeekPanel(anchor, weekScope) {
     if (this._weekPanel) {
       this._weekPanel.close();
       return;
@@ -4189,7 +5432,7 @@ class MovieGalleryPlugin extends Plugin {
     panel.createDiv({ cls: "mg-week-loading", text: "Checking your library…" });
 
     const build = async () => {
-    const { items, todayKey } = await this.thisWeekItems();
+    const { items, todayKey } = await this.thisWeekItems(weekScope);
     if (!open) return;
     panel.empty();
 
@@ -4213,7 +5456,7 @@ class MovieGalleryPlugin extends Plugin {
     const hasKey = !!this.settings.tmdbApiKey;
     const groups = [
       ["New episodes", items.filter((x) => x.group === "episode").sort((a, b) => (a.upcoming === b.upcoming ? (a.upcoming ? a.date.localeCompare(b.date) : b.date.localeCompare(a.date)) : a.upcoming ? 1 : -1))],
-      ["Releases from your To Watch", items.filter((x) => x.group === "release").sort((a, b) => a.date.localeCompare(b.date))],
+      [weekScope === "tv" ? "Premieres from your To Watch" : "Releases from your To Watch", items.filter((x) => x.group === "release").sort((a, b) => a.date.localeCompare(b.date))],
     ];
     let any = false;
     groups.forEach(([label, list]) => {
@@ -4232,7 +5475,7 @@ class MovieGalleryPlugin extends Plugin {
         main.createDiv({ cls: "mg-week-name", text: name });
         let sub;
         if (it.group === "episode") {
-          sub = `S${it.ep.s} · E${it.ep.e}${it.ep.name ? ` “${it.ep.name}”` : ""}`;
+          sub = this.__isAnime ? `Episode ${it.ep.e}` : `S${it.ep.s} · E${it.ep.e}${it.ep.name ? ` “${it.ep.name}”` : ""}`;
           if (it.behind > 1) sub += ` · ${it.behind} episodes behind`;
         } else sub = it.kind === "movie" ? "Movie release" : "Series premiere";
         main.createDiv({ cls: "mg-week-subline", text: sub });
@@ -4258,7 +5501,7 @@ class MovieGalleryPlugin extends Plugin {
       });
     });
     if (!any) panel.createDiv({ cls: "mg-week-empty", text: "Nothing new this week for the titles in your library." });
-    if (!hasKey) panel.createDiv({ cls: "mg-week-note", text: "Add your TMDB key in settings to see new episodes of shows you're watching." });
+    if (!hasKey && !this.__isAnime && weekScope !== "movie") panel.createDiv({ cls: "mg-week-note", text: "Add your TMDB key in settings to see new episodes of shows you're watching." });
     place();
     };
     await build();
@@ -4269,11 +5512,13 @@ class MovieGalleryPlugin extends Plugin {
     const icons = {
       movies: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18M3 8h4M3 12h4M3 16h4M17 8h4M17 12h4M17 16h4"/></svg>',
       tv: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="m17 2-5 5-5-5"/></svg>',
+      anime: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.4 5.6L20 9.2l-4.2 3.9L17 19l-5-3-5 3 1.2-5.9L4 9.2l5.6-.6z"/></svg>',
       discover: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m16.24 7.76-2.12 6.36-6.36 2.12 2.12-6.36z"/></svg>',
       collections: MG_ICONS.layers.replace(/width="16" height="16"/, 'width="16" height="16"'),
     };
+    if (this.__isAnime && active === "tv") active = "anime";
     const bar = parent.createDiv({ cls: "mg-tabs", attr: { role: "tablist" } });
-    [["movies", "Movies"], ["tv", "TV Shows"], ["collections", "Collections"], ["discover", "Discover"]].forEach(([key, label]) => {
+    [["movies", "Movies"], ["tv", "TV Shows"], ["anime", "Anime"], ["collections", "Collections"], ["discover", "Discover"]].forEach(([key, label]) => {
       const b = bar.createEl("button", {
         cls: "mg-tab" + (key === active ? " active" : ""),
         attr: { role: "tab", "aria-selected": String(key === active) },
@@ -4290,31 +5535,67 @@ class MovieGalleryPlugin extends Plugin {
     return bar;
   }
 
+  // One rebuild at a time per block; a request that arrives mid-rebuild runs once more afterwards.
   async renderGallery(el) {
+    if (this.__isAnime) return this.__real.renderGallery(el);
+    if (el.__mgRendering) {
+      el.__mgDirty = true;
+      return el.__mgRendering;
+    }
+    el.__mgRendering = (async () => {
+      try {
+        do {
+          el.__mgDirty = false;
+          await this._renderGalleryOnce(el);
+        } while (el.__mgDirty);
+      } finally {
+        el.__mgRendering = null;
+      }
+    })();
+    return el.__mgRendering;
+  }
+
+  async _renderGalleryOnce(el) {
     if (!this.activeTabByEl) this.activeTabByEl = new Map();
     const activeTab = this.activeTabByEl.get(el) || "movies";
 
     if (el.__terroEmbed) return this.renderEmbed(el);
 
+    // each library file is read once, in parallel, and the list for the open tab is handed on to its section
+    const [movies, shows, anime] = await Promise.all([this.readMovies(), this.readShows(), this.readAnime()]);
+    this._tabCounts = { movies: movies.length, tv: shows.length, anime: anime.length, collections: (this.collections || []).length };
+
+    // Library tabs are built off-screen and swapped in at once, so the search bar never disappears mid-rebuild.
+    if (activeTab === "movies" || activeTab === "tv" || activeTab === "anime") {
+      const sectionEl = document.createElement("div");
+      if (activeTab === "anime") await this.animeCtx.renderTvSection(sectionEl, el, anime);
+      else if (activeTab === "tv") await this.renderTvSection(sectionEl, el, shows);
+      else await this.renderMovieSection(sectionEl, el, movies);
+      const a = document.activeElement;
+      const keep = a && el.contains(a) && a.classList && a.classList.contains("movie-gallery-search") ? { start: a.selectionStart, end: a.selectionEnd } : null;
+      el.empty();
+      el.addClass("movie-gallery-block");
+      el.appendChild(sectionEl);
+      if (keep) {
+        const input = el.querySelector(".movie-gallery-search");
+        if (input) {
+          input.focus();
+          try {
+            input.setSelectionRange(keep.start, keep.end);
+          } catch (e) {}
+        }
+      }
+      return;
+    }
+
     el.empty();
     el.addClass("movie-gallery-block");
-
     const sectionEl = el.createDiv();
-
-    this._tabCounts = { movies: (await this.readMovies()).length, tv: (await this.readShows()).length, collections: (this.collections || []).length };
-
-    if (activeTab === "collections") {
-      await this.renderCollectionsSection(sectionEl, el);
-    } else if (activeTab === "discover") {
-      await this.renderDiscoverSection(sectionEl, el);
-    } else if (activeTab === "tv") {
-      await this.renderTvSection(sectionEl, el);
-    } else {
-      await this.renderMovieSection(sectionEl, el);
-    }
+    if (activeTab === "collections") await this.renderCollectionsSection(sectionEl, el);
+    else await this.renderDiscoverSection(sectionEl, el);
   }
 
-  async renderMovieSection(el, stateKey) {
+  async renderMovieSection(el, stateKey, preloaded) {
     let state = this.galleryStates.get(stateKey);
     if (!state) {
       state = {
@@ -4330,7 +5611,7 @@ class MovieGalleryPlugin extends Plugin {
     el.empty();
     el.addClass("movie-gallery-block");
 
-    const allMovies = await this.readMovies();
+    const allMovies = preloaded || (await this.readMovies());
 
     const genreOptions = Array.from(
       new Set(allMovies.flatMap((m) => (m.genres || "").split(",").map((g) => g.trim()).filter(Boolean)))
@@ -4368,11 +5649,9 @@ class MovieGalleryPlugin extends Plugin {
 
     let movieSearchDebounce = null;
     searchInput.addEventListener("input", () => {
+      state.search = searchInput.value; // kept at once so a rebuild never loses what was typed
       clearTimeout(movieSearchDebounce);
-      movieSearchDebounce = setTimeout(() => {
-        state.search = searchInput.value;
-        renderGrid();
-      }, 200);
+      movieSearchDebounce = setTimeout(() => renderGrid(), 200);
     });
 
     const statusRow = leftCluster.createDiv({ cls: "movie-gallery-segmented" });
@@ -4467,7 +5746,7 @@ class MovieGalleryPlugin extends Plugin {
 
     const toolsGroup = leftCluster.createDiv({ cls: "movie-gallery-view-group" });
 
-    this.buildWeekButton(toolsGroup);
+    this.buildWeekButton(toolsGroup, "movie");
     this.buildFavToggle(toolsGroup, state, allMovies, () => this.renderMovieSection(el, stateKey));
 
     const filterBtn = toolsGroup.createEl("button", {
@@ -4626,24 +5905,24 @@ class MovieGalleryPlugin extends Plugin {
     renderGrid();
   }
 
-  async renderTvSection(el, stateKey) {
+  async renderTvSection(el, stateKey, preloaded) {
     if (!this.tvGalleryStates) this.tvGalleryStates = new Map();
     let state = this.tvGalleryStates.get(stateKey);
     if (!state) {
       state = {
         search: "", filter: "all", genres: [], languages: [],
         years: [], sortField: "added", sortDir: "desc",
-        ratings: [], myRatings: [], showStatuses: [],
+        ratings: [], myRatings: [], showStatuses: [], formats: [],
         view: this.settings.tvView || "grid", selecting: false, selected: new Set(), person: null,
       };
       this.tvGalleryStates.set(stateKey, state);
     }
 
-    this.applyPending(stateKey, state, "tv");
+    this.applyPending(stateKey, state, this.__isAnime ? "anime" : "tv");
     el.empty();
     el.addClass("movie-gallery-block");
 
-    const allShows = await this.readShows();
+    const allShows = preloaded || (await this.readShows());
     const genreOptions = Array.from(
       new Set(allShows.flatMap((s) => (s.genres || "").split(",").map((g) => g.trim()).filter(Boolean)))
     ).sort();
@@ -4658,7 +5937,7 @@ class MovieGalleryPlugin extends Plugin {
     const headerWrap = el.createDiv({ cls: "movie-gallery-header-wrap" });
 
     const headerTop = headerWrap.createDiv({ cls: "movie-gallery-header-top" });
-    headerTop.createDiv({ cls: "movie-gallery-heading", text: "📺 TV Library" });
+    headerTop.createDiv({ cls: "movie-gallery-heading", text: this.__isAnime ? "🎌 Anime Library" : "📺 TV Library" });
 
     this.buildTabBar(headerTop, stateKey, "tv");
 
@@ -4674,15 +5953,13 @@ class MovieGalleryPlugin extends Plugin {
     });
     searchInput.value = state.search;
     this.attachSearchClear(searchInput);
-    searchInput.setAttribute("placeholder", this.searchPlaceholder("creator"));
+    searchInput.setAttribute("placeholder", this.searchPlaceholder(this.__isAnime ? "studio" : "creator"));
 
     let tvSearchDebounce = null;
     searchInput.addEventListener("input", () => {
+      state.search = searchInput.value; // kept at once so a rebuild never loses what was typed
       clearTimeout(tvSearchDebounce);
-      tvSearchDebounce = setTimeout(() => {
-        state.search = searchInput.value;
-        renderGrid();
-      }, 200);
+      tvSearchDebounce = setTimeout(() => renderGrid(), 200);
     });
 
     const statusRow = leftCluster.createDiv({ cls: "movie-gallery-segmented" });
@@ -4732,8 +6009,22 @@ class MovieGalleryPlugin extends Plugin {
       { key: "year", type: "years", label: "Year", stateKey: "years", bounds: yearBounds, counts: yearCounts, badge: (s) => countYearRuns(s.years) || null },
       { key: "language", type: "choice", stateKey: "languages", label: "Language", options: languageOptions.map((c) => [c, this.languageName(c)]), badge: (s) => (s.languages || []).length || null },
       { key: "rating", type: "ratingCombined", label: "Rating", badge: (s) => s.ratings.length + s.myRatings.length || null },
-      { key: "series", type: "choice", stateKey: "showStatuses", label: "Series", options: seriesOptions, badge: (s) => (s.showStatuses || []).length || null },
+      { key: "series", type: "choice", stateKey: "showStatuses", label: this.__isAnime ? "Airing" : "Series", options: seriesOptions, badge: (s) => (s.showStatuses || []).length || null },
     ];
+    if (this.__isAnime) {
+      const fmtCounts = { TV: 0, Movie: 0, ONA: 0, OVA: 0, Special: 0, Other: 0 };
+      allShows.forEach((x) => {
+        const g = animeFormatGroup(x.format);
+        if (g) fmtCounts[g]++;
+      });
+      const fmtOptions = [["TV", "TV", fmtCounts.TV], ["Movie", "Movie", fmtCounts.Movie], ["ONA", "ONA", fmtCounts.ONA], ["OVA", "OVA", fmtCounts.OVA], ["Special", "Special", fmtCounts.Special]];
+      if (fmtCounts.Other) fmtOptions.push(["Other", "Other", fmtCounts.Other]);
+      filterFields.push({
+        key: "format", type: "choice", stateKey: "formats", label: "Format",
+        options: fmtOptions,
+        badge: (s) => (s.formats || []).length || null,
+      });
+    }
 
     const activeFilterCount =
       state.genres.length +
@@ -4741,7 +6032,8 @@ class MovieGalleryPlugin extends Plugin {
       countYearRuns(state.years) +
       state.ratings.length +
       state.myRatings.length +
-      (state.showStatuses || []).length;
+      (state.showStatuses || []).length +
+      (state.formats || []).length;
 
     const summarizeShows = (s) => {
       const bits = [];
@@ -4751,6 +6043,7 @@ class MovieGalleryPlugin extends Plugin {
       if ((s.languages || []).length) clauses.push(`in ${s.languages.map((c) => this.languageName(c)).join(" or ")}`);
       if (s.ratings.length) clauses.push(`rated ${[...s.ratings].sort((a, b) => b - a).join(", ")} on TMDB`);
       if (s.myRatings.length) clauses.push(`that you personally rated ${[...s.myRatings].sort((a, b) => b - a).join(", ")}`);
+      if ((s.formats || []).length) clauses.push(`that are ${s.formats.join(" or ")}`);
       if ((s.showStatuses || []).length) {
         const names = { returning: "still returning", cancelled: "cancelled", ended: "ended" };
         clauses.push(`that are ${s.showStatuses.map((k) => names[k]).join(" or ")}`);
@@ -4794,7 +6087,7 @@ class MovieGalleryPlugin extends Plugin {
 
     const toolsGroup = leftCluster.createDiv({ cls: "movie-gallery-view-group" });
 
-    this.buildWeekButton(toolsGroup);
+    this.buildWeekButton(toolsGroup, "tv");
     this.buildFavToggle(toolsGroup, state, allShows, () => this.renderTvSection(el, stateKey));
 
     const filterBtn = toolsGroup.createEl("button", {
@@ -4814,7 +6107,7 @@ class MovieGalleryPlugin extends Plugin {
         onClear: () => {
           Object.assign(state, {
             genres: [], languages: [], years: [],
-            ratings: [], myRatings: [], showStatuses: [],
+            ratings: [], myRatings: [], showStatuses: [], formats: [],
           });
         },
       }).open();
@@ -4822,14 +6115,14 @@ class MovieGalleryPlugin extends Plugin {
 
     const statsBtn = toolsGroup.createEl("button", {
       cls: "movie-gallery-group-btn movie-gallery-group-btn-with-label",
-      attr: { "aria-label": "TV stats" },
+      attr: { "aria-label": this.__isAnime ? "Anime stats" : "TV stats" },
     });
     statsBtn.innerHTML = `${STATS_ICON_SVG}<span>Stats</span>`;
     statsBtn.addEventListener("click", () => new TvStatsModal(this.app, this, stateKey).open());
 
     const settingsBtn = toolsGroup.createEl("button", {
       cls: "movie-gallery-group-btn movie-gallery-group-btn-with-label",
-      attr: { "aria-label": "TV gallery settings" },
+      attr: { "aria-label": this.__isAnime ? "Anime gallery settings" : "TV gallery settings" },
     });
     settingsBtn.innerHTML = `${SETTINGS_ICON_SVG}<span>Settings</span>`;
     settingsBtn.addEventListener("click", () => new TvGallerySettingsModal(this.app, this).open());
@@ -4872,6 +6165,7 @@ class MovieGalleryPlugin extends Plugin {
       const matchesSearch =
         !q ||
         titleMatches(s.name, q) ||
+        (this.__isAnime && animeAllNames(s).some((n) => titleMatches(n, q))) ||
         (this.settings.searchDirector !== false && (s.creators || "").toLowerCase().includes(q)) ||
         (this.settings.searchCast !== false && (s.cast || "").toLowerCase().includes(q));
       const matchesFilter =
@@ -4889,7 +6183,8 @@ class MovieGalleryPlugin extends Plugin {
         (s.myRating !== "" && s.myRating != null && state.myRatings.includes(parseInt(s.myRating, 10)));
       const matchesSeries =
         !(state.showStatuses || []).length || state.showStatuses.includes(normalizeSeriesStatus(s.show_status));
-      return matchesSearch && matchesFilter && matchesGenre && matchesLanguage && matchesYear && matchesRating && matchesMyRating && matchesSeries && (!state.favOnly || !!s.favorite) &&
+      const matchesFormat = !(state.formats || []).length || state.formats.includes(animeFormatGroup(s.format));
+      return matchesSearch && matchesFilter && matchesGenre && matchesLanguage && matchesYear && matchesRating && matchesMyRating && matchesSeries && matchesFormat && (!state.favOnly || !!s.favorite) &&
         personMatches(s, state.person, "tv");
     };
 
@@ -4960,13 +6255,13 @@ class MovieGalleryPlugin extends Plugin {
         const prog = getShowProgress(s);
         const watchedSeasons = Math.min(prog.seasons, totalSeasons || Infinity);
         const watchedEps = Math.min(prog.episodes, totalEps || Infinity);
-        const showSeasons = f.seasons && totalSeasons;
+        const showSeasons = f.seasons && totalSeasons && !this.__isAnime;
         const showEpisodes = f.episodes && totalEps;
         if (showSeasons || showEpisodes) {
           const footer = posterWrap.createDiv({ cls: "movie-gallery-poster-footer" });
           const parts = [];
           if (showSeasons) parts.push(`${watchedSeasons}/${totalSeasons} season${totalSeasons === 1 ? "" : "s"}`);
-          if (showEpisodes) parts.push(`${watchedEps}/${totalEps} eps`);
+          if (showEpisodes) parts.push(this.__isAnime && !animeTotalKnown(s) ? `${watchedEps}/${totalEps} aired` : `${watchedEps}/${totalEps} eps`);
           footer.createDiv({ cls: "movie-gallery-poster-pill", text: parts.join(" · ") });
 
           // one bar: episode progress (falls back to seasons when episodes are hidden)
@@ -5027,6 +6322,7 @@ const FILTER_META = {
   language: { icon: fsvg('<circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>'), desc: "Original language of the title." },
   rating: { icon: fsvg('<path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/>'), desc: "Pick TMDB scores and your own ratings." },
   runtime: { icon: fsvg('<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>'), desc: "Filter by running time." },
+  format: { icon: fsvg('<rect x="2" y="2" width="20" height="20" rx="2.18"/><path d="M7 2v20M17 2v20M2 12h20M2 7h5M2 17h5M17 17h5M17 7h5"/>'), desc: "TV series, movies, OVAs, ONAs or specials." },
   series: { icon: fsvg('<rect x="2" y="7" width="20" height="15" rx="2"/><path d="m17 2-5 5-5-5"/>'), desc: "Where the series stands today." },
 };
 
@@ -5551,14 +6847,14 @@ class AddShowModal extends Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.addClass("movie-add-modal");
-    contentEl.createEl("h2", { text: "Add TV Show" });
+    contentEl.createEl("h2", { text: this.plugin.__isAnime ? "Add Anime" : "Add TV Show" });
 
-    if (this.plugin.settings.tmdbApiKey) {
-      contentEl.createEl("div", { cls: "movie-add-label", text: "Search TV Database" });
+    if (this.plugin.settings.tmdbApiKey || this.plugin.__isAnime) {
+      contentEl.createEl("div", { cls: "movie-add-label", text: this.plugin.__isAnime ? "Search AniList and MyAnimeList" : "Search TV Database" });
       const input = contentEl.createEl("input", {
         type: "text",
         cls: "movie-add-search-input",
-        attr: { placeholder: "Search TMDB..." },
+        attr: { placeholder: this.plugin.__isAnime ? "Search anime..." : "Search TMDB..." },
       });
       const resultsEl = contentEl.createDiv({ cls: "movie-search-results" });
       const statusEl = contentEl.createDiv({ cls: "movie-search-status" });
@@ -5572,6 +6868,18 @@ class AddShowModal extends Modal {
         }
         statusEl.setText("Searching...");
         try {
+          if (this.plugin.__isAnime) {
+            const token = (this._searchToken = (this._searchToken || 0) + 1);
+            const paint = (list, loading) => {
+              if (token !== this._searchToken) return;
+              resultsEl.empty();
+              statusEl.setText(list.length ? `${list.length} result(s)${loading ? " · checking MyAnimeList..." : ""}` : loading ? "Searching..." : "No results.");
+              for (const show of list) this.renderResult(resultsEl, show);
+            };
+            const final = await this.plugin.searchAnime(query, (partial) => paint(partial, true));
+            paint(final, false);
+            return;
+          }
           const results = await this.searchTmdb(query);
           statusEl.setText(results.length ? `${results.length} result(s)` : "No results.");
           for (const show of results) this.renderResult(resultsEl, show);
@@ -5582,7 +6890,7 @@ class AddShowModal extends Modal {
 
       input.addEventListener("input", () => {
         clearTimeout(this._searchTimer);
-        this._searchTimer = setTimeout(doSearch, 400);
+        this._searchTimer = setTimeout(doSearch, this.plugin.__isAnime ? 250 : 400);
       });
       input.addEventListener("keydown", (e) => {
         if (e.key === "Enter") {
@@ -5642,7 +6950,7 @@ class AddShowModal extends Modal {
 
     const r5 = makeRow();
     addField(r5, "Genres", "genres", { placeholder: "Drama, Comedy" });
-    addField(r5, "Creator", "creators");
+    addField(r5, this.plugin.__isAnime ? "Studio" : "Creator", "creators");
 
     const r6 = makeRow();
     addField(r6, "Status", "status", {
@@ -5702,6 +7010,7 @@ class AddShowModal extends Modal {
   }
 
   async searchTmdb(query) {
+    if (this.plugin.__isAnime) return this.plugin.searchAnime(query);
     const url =
       "https://api.themoviedb.org/3/search/tv?" +
       new URLSearchParams({ api_key: this.plugin.settings.tmdbApiKey, query }).toString();
@@ -5713,12 +7022,13 @@ class AddShowModal extends Modal {
 
   renderResult(container, show) {
     const item = container.createDiv({ cls: "movie-search-result" });
-    const posterUrl = show.poster_path ? `${POSTER_BASE}${show.poster_path}` : "";
+    const posterUrl = show.poster_url || (show.poster_path ? `${POSTER_BASE}${show.poster_path}` : "");
     item.createEl("img", { attr: { src: posterUrl, alt: show.name } });
     const info = item.createDiv({ cls: "movie-search-result-info" });
     const year = (show.first_air_date || "????").slice(0, 4);
     info.createDiv({ text: `${show.name} (${year})`, cls: "movie-search-result-title" });
     info.createDiv({ text: `⭐ ${(show.vote_average || 0).toFixed(1)}`, cls: "movie-search-result-rating" });
+    if (show.found_on) info.createDiv({ text: `Found on ${show.found_on}`, cls: "movie-search-result-rating" });
 
     item.addEventListener("click", async () => {
       item.addClass("loading");
@@ -5728,6 +7038,7 @@ class AddShowModal extends Modal {
           year,
           poster_path: show.poster_path,
           rating: (show.vote_average || 0).toFixed(1),
+          _entry: show._entry,
         });
         await this.plugin.addShow(details);
       } finally {
@@ -5767,15 +7078,19 @@ class DiscoverModal extends Modal {
     const date = discoverDate(it, this.media);
 
     const layout = contentEl.createDiv({ cls: "mg-dm-layout" });
-    if (it.poster_path) layout.createEl("img", { cls: "mg-dm-poster", attr: { src: `${POSTER_BASE}${it.poster_path}`, alt: title } });
+    const dmPoster = it.poster_url || (it.poster_path ? `${POSTER_BASE}${it.poster_path}` : "");
+    if (dmPoster) layout.createEl("img", { cls: "mg-dm-poster", attr: { src: dmPoster, alt: title } });
     const info = layout.createDiv({ cls: "mg-dm-info" });
     info.createEl("h2", { cls: "mg-dm-title", text: title });
     const sub = info.createDiv({ cls: "mg-dm-sub" });
     if (date) sub.createSpan({ text: formatShortDate(date) });
     if (it.vote_average) sub.createSpan({ cls: "mg-dm-rating", text: `★ ${it.vote_average.toFixed(1)}` });
-    sub.createSpan({ text: this.media === "movie" ? "Movie" : "TV Show" });
+    sub.createSpan({ text: this.media === "movie" ? "Movie" : this.media === "anime" ? "Anime" : "TV Show" });
 
-    const genres = (it.genre_ids || []).map((id) => TMDB_GENRE_NAMES[this.media][id]).filter(Boolean);
+    const genres =
+      this.media === "anime"
+        ? String(it.genres_text || "").split(",").map((g) => g.trim()).filter(Boolean)
+        : (it.genre_ids || []).map((id) => TMDB_GENRE_NAMES[this.media][id]).filter(Boolean);
     if (genres.length) {
       const row = info.createDiv({ cls: "mg-dm-genres" });
       genres.forEach((g) => row.createSpan({ cls: "mg-dm-genre", text: g }));
@@ -5800,10 +7115,16 @@ class DiscoverModal extends Modal {
         setActionBtnLabel(addBtn, "Add to library", false);
       }
     });
-    const tmdb = actions.createEl("button", { cls: "mg-dm-link", text: "Open on TMDB" });
-    tmdb.addEventListener("click", () =>
-      window.open(`https://www.themoviedb.org/${this.media}/${it.id}`, "_blank", "noopener,noreferrer")
-    );
+    const tmdb = actions.createEl("button", { cls: "mg-dm-link", text: this.media === "anime" ? "Open on AniList" : "Open on TMDB" });
+    tmdb.addEventListener("click", () => {
+      const url =
+        this.media === "anime"
+          ? it._entry && it._entry.anilist_id
+            ? `https://anilist.co/anime/${it._entry.anilist_id}`
+            : `https://myanimelist.net/anime/${it.mal_id}`
+          : `https://www.themoviedb.org/${this.media}/${it.id}`;
+      window.open(url, "_blank", "noopener,noreferrer");
+    });
   }
 
   onClose() {
@@ -5849,7 +7170,6 @@ class MovieDetailModal extends Modal {
     const overviewGenresWrap = info.createDiv({ cls: "movie-detail-overview-genres" });
 
     let overviewEl = null;
-    let toggleBtn = null;
 
     if (m.overview) {
       overviewEl = overviewGenresWrap.createEl("p", { cls: "movie-detail-overview-lead is-clamped" });
@@ -5861,7 +7181,6 @@ class MovieDetailModal extends Modal {
         href: "#",
       });
       moreLink.style.display = "none";
-      toggleBtn = moreLink;
 
       requestAnimationFrame(() => {
         const posterEl = layout.querySelector(".movie-detail-poster");
@@ -5870,7 +7189,8 @@ class MovieDetailModal extends Modal {
         const posterHeight = posterEl.getBoundingClientRect().height;
         const titleEl = info.querySelector(".movie-detail-title");
         const subtitleEl = info.querySelector(".movie-detail-subtitle");
-        const titleHeight = titleEl ? titleEl.getBoundingClientRect().height : 0;
+        const altEl = info.querySelector(".movie-detail-alt-names");
+        const titleHeight = (titleEl ? titleEl.getBoundingClientRect().height : 0) + (altEl ? altEl.getBoundingClientRect().height : 0);
         const subtitleHeight = subtitleEl ? subtitleEl.getBoundingClientRect().height : 0;
         const genreRow = overviewGenresWrap.querySelector(".movie-detail-chip-row");
         const genresHeight = genreRow ? genreRow.getBoundingClientRect().height : 0;
@@ -5973,7 +7293,7 @@ class MovieDetailModal extends Modal {
 
     const favBtn = statusRow.createEl("button", {
       cls: "movie-detail-fav-btn" + (m.favorite ? " is-on" : ""),
-      attr: { "aria-pressed": String(!!m.favorite) },
+      attr: { "aria-pressed": String(!!m.favorite), "aria-label": m.favorite ? "Remove from favourites" : "Add to favourites", title: m.favorite ? "Remove from favourites" : "Add to favourites" },
     });
     favBtn.innerHTML = HEART_SVG;
     favBtn.createSpan({ text: m.favorite ? "Favourite" : "Add to favourites" });
@@ -5983,7 +7303,11 @@ class MovieDetailModal extends Modal {
       this.renderView();
     });
 
-    const ratingFact = facts.createDiv({ cls: "movie-detail-fact movie-detail-fact-full" });
+    const ratingFact = facts.createDiv({ cls: "movie-detail-fact movie-detail-fact-full movie-detail-fact-rating" });
+    // the watched-date chip lives on the rating line, so the status line only holds the buttons and the heart
+    const ratingAux = ratingFact.createDiv({ cls: "movie-detail-rating-aux" });
+    const dateChipEl = statusRow.querySelector(".mg-date-chip");
+    if (dateChipEl) ratingAux.appendChild(dateChipEl);
     ratingFact.createDiv({ cls: "movie-detail-fact-label", text: "My Rating" });
     buildStarRating(ratingFact, {
       value: m.myRating,
@@ -5995,12 +7319,13 @@ class MovieDetailModal extends Modal {
     });
 
     if (m.cast) {
-      const castFact = facts.createDiv({ cls: "movie-detail-fact movie-detail-fact-full movie-detail-fact-trailing" });
+      const castFact = facts.createDiv({ cls: "movie-detail-fact movie-detail-fact-full movie-detail-fact-trailing movie-detail-fact-cast" });
       castFact.createDiv({ cls: "movie-detail-fact-label", text: "Cast" });
-      buildPeople(castFact, m.cast, "cast", (name, role) => {
+      const pickCast = (name, role) => {
         this.close();
         this.plugin.filterByPerson("movie", name, role);
-      });
+      };
+      buildPeople(castFact, m.cast, "cast", pickCast);
     }
 
 
@@ -6049,8 +7374,8 @@ class MovieDetailModal extends Modal {
     colBtn.addEventListener("click", () => new CollectionPickerModal(this.app, this.plugin, [{ t: "movie", id: m.id }]).open());
 
     const noteBtn = makeActionBtn(actions, "movie-detail-edit-btn is-icon", "note", "Note");
-    noteBtn.setAttribute("title", "Open (or create) a note for this title");
-    noteBtn.setAttribute("aria-label", "Open note");
+    noteBtn.setAttribute("title", "Open (or create) the Markdown note file for this title");
+    noteBtn.setAttribute("aria-label", "Open Markdown note");
     noteBtn.addEventListener("click", async () => {
       this.close();
       await this.plugin.openTitleNote(m, "movie");
@@ -6229,9 +7554,12 @@ class TvDetailModal extends Modal {
   }
 
   renderView() {
+    if (this.plugin.__isAnime) return this.renderAnimeView();
     const { contentEl } = this;
     contentEl.empty();
     contentEl.addClass("movie-detail-modal");
+    contentEl.removeClass("mg-ad");
+    this.modalEl.removeClass("mg-ad-shell");
     const s = this.show;
 
     const layout = contentEl.createDiv({ cls: "movie-detail-layout" });
@@ -6246,13 +7574,12 @@ class TvDetailModal extends Modal {
     if (s.year) subtitleRow.createSpan({ cls: "movie-detail-subtitle-year", text: s.year });
     if (s.year) subtitleRow.createSpan({ cls: "movie-detail-subtitle-dot", text: "·" });
     const ratingPill = subtitleRow.createSpan({ cls: "movie-detail-rating-pill" });
-    ratingPill.createSpan({ cls: "movie-detail-rating-src", text: "TMDB" });
+    ratingPill.createSpan({ cls: "movie-detail-rating-src", text: s.rating_source || "TMDB" });
     ratingPill.createSpan({ text: `★ ${s.rating}` });
 
     const overviewGenresWrap = info.createDiv({ cls: "movie-detail-overview-genres" });
 
     let overviewEl = null;
-    let toggleBtn = null;
 
     if (s.overview) {
       overviewEl = overviewGenresWrap.createEl("p", { cls: "movie-detail-overview-lead is-clamped" });
@@ -6264,7 +7591,6 @@ class TvDetailModal extends Modal {
         href: "#",
       });
       moreLink.style.display = "none";
-      toggleBtn = moreLink;
 
       requestAnimationFrame(() => {
         const posterEl = layout.querySelector(".movie-detail-poster");
@@ -6273,7 +7599,8 @@ class TvDetailModal extends Modal {
         const posterHeight = posterEl.getBoundingClientRect().height;
         const titleEl = info.querySelector(".movie-detail-title");
         const subtitleEl = info.querySelector(".movie-detail-subtitle");
-        const titleHeight = titleEl ? titleEl.getBoundingClientRect().height : 0;
+        const altEl = info.querySelector(".movie-detail-alt-names");
+        const titleHeight = (titleEl ? titleEl.getBoundingClientRect().height : 0) + (altEl ? altEl.getBoundingClientRect().height : 0);
         const subtitleHeight = subtitleEl ? subtitleEl.getBoundingClientRect().height : 0;
         const genreRow = overviewGenresWrap.querySelector(".movie-detail-chip-row");
         const genresHeight = genreRow ? genreRow.getBoundingClientRect().height : 0;
@@ -6358,17 +7685,20 @@ class TvDetailModal extends Modal {
 
     if (s.creators) {
       const f = facts.createDiv({ cls: "movie-detail-fact" });
-      f.createDiv({ cls: "movie-detail-fact-label", text: "Creator" });
+      f.createDiv({ cls: "movie-detail-fact-label", text: this.plugin.__isAnime ? "Studio" : "Creator" });
       buildPeople(f, s.creators, "creator", (name, role) => {
         this.close();
-        this.plugin.filterByPerson("tv", name, role);
+        this.plugin.filterByPerson(this.plugin.__isAnime ? "anime" : "tv", name, role);
       });
     }
     addFact("First Air Date", this.plugin.formatDate(s.first_air_date));
     addFact("Episode Runtime", this.plugin.formatRuntime(s.episode_runtime));
     addFact("Language", this.plugin.languageName(s.original_language));
-    addFact("Seasons", s.number_of_seasons ? String(s.number_of_seasons) : "");
-    addFact("Series Status", s.show_status);
+    if (!this.plugin.__isAnime) addFact("Seasons", s.number_of_seasons ? String(s.number_of_seasons) : "");
+    addFact(this.plugin.__isAnime ? "Airing Status" : "Series Status", s.show_status);
+
+    // Order: facts, progress, status (with favourites), my rating, cast.
+    buildProgressFact(this, facts, s);
 
     const statusFact = facts.createDiv({ cls: "movie-detail-fact movie-detail-fact-full" });
     statusFact.createDiv({ cls: "movie-detail-fact-label", text: "Status" });
@@ -6377,7 +7707,7 @@ class TvDetailModal extends Modal {
 
     const favBtn = statusRow.createEl("button", {
       cls: "movie-detail-fav-btn" + (s.favorite ? " is-on" : ""),
-      attr: { "aria-pressed": String(!!s.favorite) },
+      attr: { "aria-pressed": String(!!s.favorite), "aria-label": s.favorite ? "Remove from favourites" : "Add to favourites", title: s.favorite ? "Remove from favourites" : "Add to favourites" },
     });
     favBtn.innerHTML = HEART_SVG;
     favBtn.createSpan({ text: s.favorite ? "Favourite" : "Add to favourites" });
@@ -6387,7 +7717,11 @@ class TvDetailModal extends Modal {
       this.renderView();
     });
 
-    const ratingFact = facts.createDiv({ cls: "movie-detail-fact movie-detail-fact-full" });
+    const ratingFact = facts.createDiv({ cls: "movie-detail-fact movie-detail-fact-full movie-detail-fact-rating" });
+    // the watched-date chip lives on the rating line, so the status line only holds the buttons and the heart
+    const ratingAux = ratingFact.createDiv({ cls: "movie-detail-rating-aux" });
+    const dateChipEl = statusRow.querySelector(".mg-date-chip");
+    if (dateChipEl) ratingAux.appendChild(dateChipEl);
     ratingFact.createDiv({ cls: "movie-detail-fact-label", text: "My Rating" });
     buildStarRating(ratingFact, {
       value: s.myRating,
@@ -6398,33 +7732,28 @@ class TvDetailModal extends Modal {
       },
     });
 
-    buildProgressFact(this, facts, s);
-
     // Older entries: fetch real per-season episode counts once so the link is exact.
     const tried = (this.plugin._seasonDataTried = this.plugin._seasonDataTried || new Set());
-    if (
-      (s.number_of_seasons || 0) > 1 &&
-      !(Array.isArray(s.season_episodes) && s.season_episodes.length) &&
-      !tried.has(s.id)
-    ) {
+    if ((s.number_of_seasons || 0) > 1 && !(Array.isArray(s.season_episodes) && s.season_episodes.length) && !tried.has(s.id)) {
       tried.add(s.id);
+      const before = { ...s };
       this.plugin.backfillSeasonEpisodes(s).then(async (ok) => {
         if (!ok) return;
         syncShowProgress(s, "episodes");
-        await this.plugin.updateShow(s);
-        if (!this._closed) this.renderView();
+        await this.plugin.patchShow(before, s, (latest) => syncShowProgress(latest, "episodes"));
+        if (!this._closed) rerenderWhenIdle(this);
       });
     }
 
     if (s.cast) {
-      const castFact = facts.createDiv({ cls: "movie-detail-fact movie-detail-fact-full" });
-      castFact.createDiv({ cls: "movie-detail-fact-label", text: "Cast" });
-      buildPeople(castFact, s.cast, "cast", (name, role) => {
+      const castFact = facts.createDiv({ cls: "movie-detail-fact movie-detail-fact-full movie-detail-fact-cast" });
+      castFact.createDiv({ cls: "movie-detail-fact-label", text: this.plugin.__isAnime ? "Voice Cast" : "Cast" });
+      const pickCast = (name, role) => {
         this.close();
-        this.plugin.filterByPerson("tv", name, role);
-      });
+        this.plugin.filterByPerson(this.plugin.__isAnime ? "anime" : "tv", name, role);
+      };
+      buildPeople(castFact, s.cast, "cast", pickCast);
     }
-
 
     buildNotesCard(this, contentEl, {
       title: s.name,
@@ -6436,7 +7765,14 @@ class TvDetailModal extends Modal {
       },
     });
 
-    const actions = contentEl.createDiv({ cls: "movie-detail-actions" });
+    this.renderDetailActions(contentEl);
+
+    this.renderSimilar(contentEl);
+  }
+
+  renderDetailActions(parent) {
+    const s = this.show;
+    const actions = parent.createDiv({ cls: "movie-detail-actions" });
     if (s.trailer_key) {
       const trailerBtn = makeActionBtn(actions, "movie-detail-trailer-btn", "play", "Watch Trailer");
       trailerBtn.addEventListener("click", () => {
@@ -6448,7 +7784,7 @@ class TvDetailModal extends Modal {
 
     const updateBtn = makeActionBtn(actions, "movie-detail-update-btn", "refresh", "Update");
     updateBtn.addEventListener("click", async () => {
-      if (!this.plugin.settings.tmdbApiKey) {
+      if (!this.plugin.settings.tmdbApiKey && !this.plugin.__isAnime) {
         new Notice("Add a TMDB API key in settings to update this entry.");
         return;
       }
@@ -6468,11 +7804,11 @@ class TvDetailModal extends Modal {
     const colBtn = makeActionBtn(actions, "movie-detail-edit-btn is-icon", "plus", "Collection");
     colBtn.setAttribute("title", "Add to a collection");
     colBtn.setAttribute("aria-label", "Add to a collection");
-    colBtn.addEventListener("click", () => new CollectionPickerModal(this.app, this.plugin, [{ t: "tv", id: s.id }]).open());
+    colBtn.addEventListener("click", () => new CollectionPickerModal(this.app, this.plugin, [{ t: this.plugin.__isAnime ? "anime" : "tv", id: s.id }]).open());
 
     const noteBtn = makeActionBtn(actions, "movie-detail-edit-btn is-icon", "note", "Note");
-    noteBtn.setAttribute("title", "Open (or create) a note for this title");
-    noteBtn.setAttribute("aria-label", "Open note");
+    noteBtn.setAttribute("title", "Open (or create) the Markdown note file for this title");
+    noteBtn.setAttribute("aria-label", "Open Markdown note");
     noteBtn.addEventListener("click", async () => {
       this.close();
       await this.plugin.openTitleNote(s, "tv");
@@ -6482,20 +7818,23 @@ class TvDetailModal extends Modal {
     deleteBtn.setAttribute("title", "Delete");
     deleteBtn.setAttribute("aria-label", "Delete");
     deleteBtn.addEventListener("click", async () => {
-      if (confirm(`Delete "${s.name}" from your TV library?`)) {
+      if (confirm(`Delete "${s.name}" from your ${this.plugin.__isAnime ? "anime" : "TV"} library?`)) {
         await this.plugin.removeShow(s.id);
         this.close();
       }
     });
+  }
 
-    const similarSection = contentEl.createDiv({ cls: "movie-detail-similar-section" });
-    similarSection.createEl("h3", { text: "Similar Shows", cls: "movie-detail-section-title" });
+  renderSimilar(parent) {
+    const s = this.show;
+    const similarSection = parent.createDiv({ cls: "movie-detail-similar-section" });
+    similarSection.createEl("h3", { text: this.plugin.__isAnime ? "Similar Anime" : "Similar Shows", cls: "movie-detail-section-title" });
     const similarList = similarSection.createDiv({ cls: "movie-detail-similar-list" });
 
     if (this._similarResults) {
       this.populateSimilar(similarList, this._similarResults);
     } else {
-      similarList.createDiv({ cls: "movie-detail-similar-loading", text: "Loading similar shows..." });
+      similarList.createDiv({ cls: "movie-detail-similar-loading", text: this.plugin.__isAnime ? "Loading similar anime..." : "Loading similar shows..." });
       this.plugin.fetchSimilarShows(s.id).then((results) => {
         this._similarResults = results;
         if (document.body.contains(similarList)) {
@@ -6505,10 +7844,229 @@ class TvDetailModal extends Modal {
     }
   }
 
+  // ---- Anime: poster and voice cast on the left, everything else on the right ----
+  renderAnimeView() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass("movie-detail-modal", "mg-ad");
+    this.modalEl.addClass("mg-ad-shell");
+    const s = this.show;
+
+    const layout = contentEl.createDiv({ cls: "mg-ad-layout" });
+    const left = layout.createDiv({ cls: "mg-ad-left" });
+    const right = layout.createDiv({ cls: "mg-ad-right" });
+
+    left.createEl("img", { cls: "mg-ad-poster", attr: { src: getPosterUrl(s), alt: s.name } });
+    this.buildAnimeCast(left, s);
+    buildNotesCard(this, left, {
+      title: s.name,
+      notes: s.notes,
+      onSave: async (text) => {
+        s.notes = text;
+        await this.plugin.updateShow(s);
+        this.renderView();
+      },
+    });
+
+    // header
+    right.createEl("h2", { text: s.name, cls: "movie-detail-title" });
+    const alts = animeAltNames(s);
+    if (alts.length) right.createDiv({ cls: "movie-detail-alt-names", text: alts.join(" · ") });
+    const sub = right.createDiv({ cls: "movie-detail-subtitle" });
+    if (s.year) {
+      sub.createSpan({ cls: "movie-detail-subtitle-year", text: s.year });
+      sub.createSpan({ cls: "movie-detail-subtitle-dot", text: "·" });
+    }
+    const pill = sub.createSpan({ cls: "movie-detail-rating-pill" });
+    pill.createSpan({ cls: "movie-detail-rating-src", text: s.rating_source || "AniList" });
+    pill.createSpan({ text: `★ ${s.rating}` });
+    if (s.genres) {
+      const genreRow = right.createDiv({ cls: "mg-ad-genres" });
+      s.genres.split(",").map((g) => g.trim()).filter(Boolean).forEach((g) => genreRow.createSpan({ cls: "mg-ad-chip", text: g }));
+    }
+    if (s.overview) {
+      const text = right.createDiv({ cls: "mg-ad-overview is-clamped", text: s.overview });
+      if (s.overview.length > 240) {
+        const more = right.createEl("a", { cls: "mg-ad-more", text: "Show more", href: "#" });
+        more.addEventListener("click", (e) => {
+          e.preventDefault();
+          more.setText(text.classList.toggle("is-clamped") ? "Show more" : "Show less");
+        });
+      }
+    }
+
+    // facts
+    const facts = right.createDiv({ cls: "mg-ad-facts" });
+    const fact = (label, value) => {
+      if (!value) return;
+      const f = facts.createDiv({ cls: "mg-ad-fact" });
+      f.createDiv({ cls: "movie-detail-fact-label", text: label });
+      f.createDiv({ cls: "mg-ad-fact-value", text: value });
+    };
+    fact("Format", s.format);
+    if (s.creators) {
+      const f = facts.createDiv({ cls: "mg-ad-fact" });
+      f.createDiv({ cls: "movie-detail-fact-label", text: "Studio" });
+      buildPeople(f, s.creators, "creator", (name, role) => {
+        this.close();
+        this.plugin.filterByPerson("anime", name, role);
+      });
+    }
+    fact("Airing", s.show_status);
+    fact("First aired", this.plugin.formatDate(s.first_air_date));
+    fact("Runtime", this.plugin.formatRuntime(s.episode_runtime));
+    fact("Language", this.plugin.languageName(s.original_language));
+
+    // progress, status, rating
+    buildProgressFact(this, right, s);
+    const statusRow = right.createDiv({ cls: "mg-ad-statusrow" });
+    const statusControl = statusRow.createDiv({ cls: "movie-detail-status-row" });
+    buildStatusControl(this, statusControl, s, "tv");
+    const favBtn = statusControl.createEl("button", {
+      cls: "movie-detail-fav-btn" + (s.favorite ? " is-on" : ""),
+      attr: { "aria-pressed": String(!!s.favorite), "aria-label": s.favorite ? "Remove from favourites" : "Add to favourites" },
+    });
+    favBtn.innerHTML = HEART_SVG;
+    favBtn.addEventListener("click", async () => {
+      s.favorite = !s.favorite;
+      await this.plugin.updateShow(s);
+      this.renderView();
+    });
+    buildStarRating(statusRow, {
+      value: s.myRating,
+      onChange: async (newVal) => {
+        s.myRating = newVal;
+        await this.plugin.updateShow(s);
+        this.renderView();
+      },
+    });
+
+    // related titles as a poster gallery
+    if (Array.isArray(s.related) && s.related.length) {
+      const rel = right.createDiv({ cls: "mg-ad-related" });
+      rel.createDiv({ cls: "mg-ad-label", text: `Related · ${s.related.length}` });
+      this.populateRelated(rel.createDiv({ cls: "movie-detail-similar-list" }), s.related);
+    }
+
+    // under both columns: the buttons, then similar titles
+    const bottom = contentEl.createDiv({ cls: "mg-ad-bottom" });
+    this.renderDetailActions(bottom);
+    this.renderSimilar(bottom);
+
+    this.startAnimeBackfill(s);
+  }
+
+  // Voice cast: photo, actor and the character they voice.
+  buildAnimeCast(parent, s) {
+    if (!s.cast && !s.anilist_id && !s.mal_id) return;
+    const card = parent.createDiv({ cls: "mg-ad-cast" });
+    const people = Array.isArray(s.cast_people) && s.cast_people.length ? s.cast_people : s.cast ? s.cast.split(",").map((n) => ({ name: n.trim(), image: "", character: "" })) : [];
+    card.createDiv({ cls: "mg-ad-label", text: people.length ? `Voice cast · ${people.length}` : "Voice cast" });
+    if (!people.length) {
+      const row = card.createDiv({ cls: "mg-cast-status" });
+      row.createSpan({
+        text: this._castLooking ? "Looking up voice cast…" : s.cast_error ? `Couldn't load voice cast (${s.cast_error}).` : "No voice cast listed yet.",
+      });
+      if (!this._castLooking) {
+        const retry = row.createEl("button", { cls: "mg-cast-retry", text: "Retry" });
+        retry.addEventListener("click", async () => {
+          this._castLooking = true;
+          this.renderView();
+          const before = { ...s };
+          await this.plugin.fetchAnimeCast(s);
+          this._castLooking = false;
+          await this.plugin.patchShow(before, s);
+          if (!this._closed) rerenderWhenIdle(this);
+        });
+      }
+      return;
+    }
+    (this._castAll ? people : people.slice(0, 6)).forEach((p) => {
+      const row = card.createDiv({ cls: "mg-ad-person", attr: { role: "button", tabindex: "0", title: `Show anime with ${p.name}` } });
+      const face = row.createDiv({ cls: "mg-ad-face" });
+      if (p.image) face.createEl("img", { attr: { src: p.image, alt: p.name, loading: "lazy" } });
+      else {
+        face.setText(Array.from(p.name.trim())[0] || "?");
+        face.style.background = `hsl(${Array.from(p.name).reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7)}, 38%, 32%)`;
+      }
+      const names = row.createDiv({ cls: "mg-ad-names" });
+      names.createDiv({ cls: "mg-ad-actor", text: p.name });
+      if (p.character) names.createDiv({ cls: "mg-ad-char", text: `as ${p.character}` });
+      const pick = () => {
+        this.close();
+        this.plugin.filterByPerson("anime", p.name, "cast");
+      };
+      row.addEventListener("click", pick);
+      row.addEventListener("keydown", (e) => e.key === "Enter" && pick());
+    });
+    if (people.length > 6) {
+      const more = card.createEl("a", { cls: "mg-ad-more", text: this._castAll ? "Show fewer" : `Show all ${people.length}`, href: "#" });
+      more.addEventListener("click", (e) => {
+        e.preventDefault();
+        this._castAll = !this._castAll;
+        this.renderView();
+      });
+    }
+  }
+
+  // ---- Anime: keep cast, related titles and the aired count current ----
+  startAnimeBackfill(s) {
+    const tried = (this.plugin._seasonDataTried = this.plugin._seasonDataTried || new Set());
+    if ((!s.extras_v || animeNeedsCast(s)) && !tried.has(`anime:${s.id}`)) {
+      tried.add(`anime:${s.id}`);
+      this._castLooking = true;
+      const before = { ...s };
+      this.plugin.backfillAnimeExtras(s).then(async (ok) => {
+        this._castLooking = false;
+        if (ok) await this.plugin.patchShow(before, s);
+        if (!this._closed) rerenderWhenIdle(this);
+      });
+    }
+    if (animeIsAiring(s) && s.anilist_id && !this._airedChecked) {
+      this._airedChecked = true;
+      this.plugin.refreshAiredCount(s).then((changed) => {
+        if (changed && !this._closed) rerenderWhenIdle(this);
+      });
+    }
+  }
+
+  // Anime: sequels, prequels and other related titles replace the idea of seasons.
+  async populateRelated(container, related) {
+    container.empty();
+    const lib = await this.plugin.readShows();
+    const byId = new Map(lib.map((x) => [x.id, x]));
+    related.forEach((r) => {
+      const mine = byId.get(r.id) || (r.mal_id && lib.find((x) => x.mal_id === r.mal_id)) || null;
+      const card = container.createDiv({ cls: "movie-detail-similar-card mg-related-card" });
+      const wrap = card.createDiv({ cls: "movie-detail-similar-poster-wrap" });
+      wrap.createEl("img", { attr: { src: r.poster || "", alt: r.title, loading: "lazy" } });
+      wrap.createDiv({ cls: "mg-related-rel", text: r.relation });
+      if (mine) wrap.createDiv({ cls: "movie-detail-similar-badge is-added", text: "✓" });
+      else {
+        const add = wrap.createDiv({ cls: "movie-detail-similar-badge", text: "+", attr: { "aria-label": "Add to library" } });
+        add.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          add.setText("…");
+          const details = await this.plugin.fetchShowDetails(r.id, { anilist_id: r.anilist_id, mal_id: r.mal_id, name: r.title });
+          await this.plugin.addShow(details);
+          add.setText("✓");
+          add.addClass("is-added");
+        });
+      }
+      card.createDiv({ cls: "movie-detail-similar-title", text: `${r.title}${r.year ? ` (${r.year})` : ""}` });
+      const meta = [r.format, r.episodes ? `${r.episodes} eps` : ""].filter(Boolean).join(" · ");
+      if (meta) card.createDiv({ cls: "mg-related-meta", text: meta });
+      if (mine) card.addEventListener("click", () => {
+        this.close();
+        new TvDetailModal(this.app, this.plugin, mine).open();
+      });
+    });
+  }
+
   async populateSimilar(container, results) {
     container.empty();
     if (!results.length) {
-      container.createDiv({ cls: "movie-detail-similar-empty", text: "No similar shows found." });
+      container.createDiv({ cls: "movie-detail-similar-empty", text: this.plugin.__isAnime ? "No similar anime found." : "No similar shows found." });
       return;
     }
 
@@ -6518,7 +8076,7 @@ class TvDetailModal extends Modal {
     for (const sm of results) {
       const card = container.createDiv({ cls: "movie-detail-similar-card" });
       const posterWrap = card.createDiv({ cls: "movie-detail-similar-poster-wrap" });
-      const posterUrl = sm.poster_path ? `${POSTER_BASE}${sm.poster_path}` : "";
+      const posterUrl = sm.poster_url || (sm.poster_path ? `${POSTER_BASE}${sm.poster_path}` : "");
       posterWrap.createEl("img", { attr: { src: posterUrl, alt: sm.name, loading: "lazy" } });
       const year = (sm.first_air_date || "????").slice(0, 4);
 
@@ -6535,6 +8093,8 @@ class TvDetailModal extends Modal {
             year,
             poster_path: sm.poster_path,
             rating: (sm.vote_average || 0).toFixed(1),
+            _entry: sm._entry,
+            mal_id: sm.mal_id,
           });
           await this.plugin.addShow(details);
           addBadge.setText("✓");
@@ -6551,6 +8111,8 @@ class TvDetailModal extends Modal {
     contentEl.empty();
     contentEl.addClass("movie-detail-modal");
     contentEl.addClass("movie-add-modal");
+    contentEl.removeClass("mg-ad");
+    this.modalEl.removeClass("mg-ad-shell");
     const s = this.show;
 
     contentEl.createEl("h2", { text: `Edit ${s.name}` });
@@ -6626,7 +8188,7 @@ class TvDetailModal extends Modal {
 
     const r4 = makeRow();
     addField(r4, "Series Status", "show_status", { placeholder: "e.g. Ended, Returning Series" });
-    addField(r4, "Creator", "creators");
+    addField(r4, this.plugin.__isAnime ? "Studio" : "Creator", "creators");
 
     const r5 = makeRow();
     addField(r5, "Genres", "genres", { placeholder: "Comma-separated" });
@@ -6795,7 +8357,7 @@ class TvGallerySettingsModal extends Modal {
     const { contentEl } = this;
     contentEl.empty();
     contentEl.addClass("movie-gallery-settings-modal");
-    contentEl.createEl("h2", { text: "TV Gallery Settings" });
+    contentEl.createEl("h2", { text: this.plugin.__isAnime ? "Anime Gallery Settings" : "TV Gallery Settings" });
 
     contentEl.createEl("h3", { text: "Show on Cards", cls: "movie-gallery-settings-section-title" });
     const fieldsWrap = contentEl.createDiv({ cls: "movie-gallery-settings-toggles" });
@@ -6805,12 +8367,12 @@ class TvGallerySettingsModal extends Modal {
       ["year", "Year"],
       ["rating", "Rating"],
       ["genres", "Genres"],
-      ["director", "Creator"],
+      ["director", this.plugin.__isAnime ? "Studio" : "Creator"],
       ["status", "Status"],
       ["favorite", "Favourite"],
       ["runtime", "Episode Runtime"],
       ["language", "Language"],
-      ["seasons", "Season progress"],
+      ...(this.plugin.__isAnime ? [] : [["seasons", "Season progress"]]),
       ["episodes", "Episode progress"],
       ["myRating", "My Rating"],
     ];
@@ -6840,7 +8402,7 @@ class TvGallerySettingsModal extends Modal {
       createControl(controlWrap);
     };
 
-    layoutRow("Shows per row", (wrap) => {
+    layoutRow(this.plugin.__isAnime ? "Anime per row" : "Shows per row", (wrap) => {
       const drop = wrap.createEl("select", { cls: "movie-gallery-settings-select" });
       ["auto", "2", "3", "4", "5", "6", "7", "8"].forEach((v) => {
         const opt = drop.createEl("option", { text: v === "auto" ? "Auto" : v, attr: { value: v } });
@@ -6870,23 +8432,25 @@ class TvGallerySettingsModal extends Modal {
       });
     });
 
-    addSearchSettings(contentEl, this.plugin, "creator");
+    addSearchSettings(contentEl, this.plugin, this.plugin.__isAnime ? "studio" : "creator");
 
     contentEl.createDiv({ cls: "movie-gallery-settings-divider" });
     contentEl.createEl("h3", { text: "Data", cls: "movie-gallery-settings-section-title" });
 
     buildDataTools(contentEl, {
       plugin: this.plugin,
-      noun: "show",
-      skipNoun: "TV",
-      updateDesc: "Refresh info from TMDB. Status, notes, ratings and progress are kept.",
+      noun: this.plugin.__isAnime ? "anime" : "show",
+      skipNoun: this.plugin.__isAnime ? "anime" : "TV",
+      accept: this.plugin.__isAnime ? ".csv,.xml" : ".csv",
+      updateDesc: this.plugin.__isAnime ? "Refresh info from AniList and MyAnimeList. Status, notes, ratings and progress are kept." : "Refresh info from TMDB. Status, notes, ratings and progress are kept.",
       refreshAll: (cb) => this.plugin.refreshAllShows(cb),
       backup: (fmt) => this.plugin.backupShows(fmt),
       importFile: (text, name, cb) => this.plugin.importShows(text, name, cb),
-      importDesc: "Backup or IMDb export (movies are skipped)",
+      importDesc: this.plugin.__isAnime ? "MyAnimeList export (.xml) or a TerroTrack backup (.csv)" : "Backup or IMDb export (movies are skipped)",
       noKeyMsg: "Set your TMDB API key first — needed to match IMDb entries.",
-      unsupportedMsg: "Letterboxd doesn't track TV shows, so that export can't be used here.",
-      formatLabels: { imdb: "IMDb", native: "backup" },
+      unsupportedMsg: this.plugin.__isAnime ? "That file isn't a MyAnimeList export or a TerroTrack backup." : "Letterboxd doesn't track TV shows, so that export can't be used here.",
+      formatLabels: { imdb: "IMDb", native: "backup", mal: "MyAnimeList" },
+      extra: this.plugin.__isAnime ? buildAnimeTransferRows(this.plugin) : null,
     });
   }
 
@@ -6903,20 +8467,16 @@ class StatsModal extends Modal {
   }
 
   jumpToSearch(query) {
-    const state = this.plugin.galleryStates.get(this.galleryEl);
-    if (state) {
-      state.search = query;
-      this.plugin.renderGallery(this.galleryEl);
-    }
-    this.close();
+    return statsJump(this, "movies", query);
   }
 
   async onOpen() {
     const { contentEl } = this;
     this.modalEl.addClass("mg-stats-modal-shell");
     contentEl.addClass("movie-gallery-stats-modal");
-    contentEl.createEl("h2", { text: "Library Stats" });
-    buildActivityHeatmap(contentEl, this.plugin);
+    this.__scope = "movie";
+    buildStatsHead(this, "movie");
+    buildActivityHeatmap(contentEl, this.plugin, "movie");
 
     const stats = await this.plugin.computeStats();
 
@@ -6972,24 +8532,6 @@ class StatsModal extends Modal {
     const breakdownRow = contentEl.createDiv({ cls: "movie-stats-breakdown-row" });
     if (ratingCardEl) breakdownRow.appendChild(ratingCardEl);
 
-    const makeDonutCol = (title, centerText, centerLabel, conicStops, legendItems) => {
-      const col = breakdownRow.createDiv({ cls: "movie-stats-breakdown-col" });
-      col.createDiv({ cls: "movie-stats-breakdown-title", text: title });
-      const donut = col.createDiv({ cls: "movie-stats-donut movie-stats-donut-sm" });
-      donut.style.background = `conic-gradient(${conicStops})`;
-      const hole = donut.createDiv({ cls: "movie-stats-donut-hole movie-stats-donut-hole-sm" });
-      hole.createDiv({ cls: "movie-stats-donut-total", text: centerText });
-      hole.createDiv({ cls: "movie-stats-donut-total-label", text: centerLabel });
-      const legend = col.createDiv({ cls: "movie-stats-mini-legend" });
-      legendItems.forEach(([color, label]) => {
-        const chip = legend.createDiv({ cls: "movie-stats-mini-legend-item" });
-        const dot = chip.createDiv({ cls: "movie-stats-mini-legend-dot" });
-        dot.style.background = color;
-        chip.createSpan({ text: label });
-      });
-      return col;
-    };
-
     if (stats.total > 0) {
       const watchedPct = Math.round((stats.watchedCount / stats.total) * 100);
       const parts = [
@@ -6998,21 +8540,13 @@ class StatsModal extends Modal {
         ["rgba(255,255,255,0.25)", "To Watch", stats.toWatchCount],
         ["#a35b61", "Trashed", stats.droppedCount],
       ].filter(([, , n]) => n > 0);
-      let acc = 0;
-      const stops = parts
-        .map(([color, , n]) => {
-          const from = acc;
-          acc += (n / stats.total) * 100;
-          return `${color} ${from}% ${acc}%`;
-        })
-        .join(", ");
       renderStatusBreakdown(breakdownRow, parts, stats.total, watchedPct);
     }
 
     if (stats.topGenres.length) {
       const genreCol = breakdownRow.createDiv({ cls: "movie-stats-breakdown-col movie-stats-genre-col" });
       genreCol.createDiv({ cls: "movie-stats-breakdown-title", text: "Genre Breakdown" });
-      this.renderGenrePie(genreCol, stats.topGenres);
+      this.renderGenreBars(genreCol, stats.topGenres);
     }
 
     if (stats.topYear || stats.topDirector || stats.topCast) {
@@ -7041,7 +8575,7 @@ class StatsModal extends Modal {
     }
   }
 
-  renderGenrePie(container, topGenres) {
+  renderGenreBars(container, topGenres) {
     const max = Math.max(1, ...topGenres.map(([, count]) => count));
     const list = container.createDiv({ cls: "mg-genre-bars" });
     topGenres.forEach(([genre, count], i) => {
@@ -7067,27 +8601,23 @@ class TvStatsModal extends Modal {
   }
 
   jumpToSearch(query) {
-    const state = this.plugin.tvGalleryStates.get(this.galleryEl);
-    if (state) {
-      state.search = query;
-      this.plugin.renderGallery(this.galleryEl);
-    }
-    this.close();
+    return statsJump(this, this.plugin.__isAnime ? "anime" : "tv", query);
   }
 
   async onOpen() {
     const { contentEl } = this;
     this.modalEl.addClass("mg-stats-modal-shell");
     contentEl.addClass("movie-gallery-stats-modal");
-    contentEl.createEl("h2", { text: "TV Stats" });
-    buildActivityHeatmap(contentEl, this.plugin);
+    this.__scope = this.plugin.__isAnime ? "anime" : "tv";
+    buildStatsHead(this, this.__scope);
+    buildActivityHeatmap(contentEl, this.plugin, this.__scope);
 
     const stats = await this.plugin.computeShowStats();
 
     if (!stats.total) {
       contentEl.createEl("p", {
         cls: "movie-gallery-settings-desc",
-        text: "Add some TV shows and your stats will show up here.",
+        text: this.plugin.__isAnime ? "Add some anime and your stats will show up here." : "Add some TV shows and your stats will show up here.",
       });
       return;
     }
@@ -7136,24 +8666,6 @@ class TvStatsModal extends Modal {
     const breakdownRow = contentEl.createDiv({ cls: "movie-stats-breakdown-row" });
     if (ratingCardEl) breakdownRow.appendChild(ratingCardEl);
 
-    const makeDonutCol = (title, centerText, centerLabel, conicStops, legendItems) => {
-      const col = breakdownRow.createDiv({ cls: "movie-stats-breakdown-col" });
-      col.createDiv({ cls: "movie-stats-breakdown-title", text: title });
-      const donut = col.createDiv({ cls: "movie-stats-donut movie-stats-donut-sm" });
-      donut.style.background = `conic-gradient(${conicStops})`;
-      const hole = donut.createDiv({ cls: "movie-stats-donut-hole movie-stats-donut-hole-sm" });
-      hole.createDiv({ cls: "movie-stats-donut-total", text: centerText });
-      hole.createDiv({ cls: "movie-stats-donut-total-label", text: centerLabel });
-      const legend = col.createDiv({ cls: "movie-stats-mini-legend" });
-      legendItems.forEach(([color, label]) => {
-        const chip = legend.createDiv({ cls: "movie-stats-mini-legend-item" });
-        const dot = chip.createDiv({ cls: "movie-stats-mini-legend-dot" });
-        dot.style.background = color;
-        chip.createSpan({ text: label });
-      });
-      return col;
-    };
-
     if (stats.total > 0) {
       const watchedPct = Math.round((stats.watchedCount / stats.total) * 100);
       const parts = [
@@ -7162,21 +8674,13 @@ class TvStatsModal extends Modal {
         ["rgba(255,255,255,0.25)", "To Watch", stats.toWatchCount],
         ["#a35b61", "Trashed", stats.droppedCount],
       ].filter(([, , n]) => n > 0);
-      let acc = 0;
-      const stops = parts
-        .map(([color, , n]) => {
-          const from = acc;
-          acc += (n / stats.total) * 100;
-          return `${color} ${from}% ${acc}%`;
-        })
-        .join(", ");
       renderStatusBreakdown(breakdownRow, parts, stats.total, watchedPct);
     }
 
     if (stats.topGenres.length) {
       const genreCol = breakdownRow.createDiv({ cls: "movie-stats-breakdown-col movie-stats-genre-col" });
       genreCol.createDiv({ cls: "movie-stats-breakdown-title", text: "Genre Breakdown" });
-      this.renderGenrePie(genreCol, stats.topGenres);
+      this.renderGenreBars(genreCol, stats.topGenres);
     }
 
     if (stats.topYear || stats.topDirector || stats.topCast) {
@@ -7200,12 +8704,12 @@ class TvStatsModal extends Modal {
       };
 
       habitTile("", "Favorite Year", stats.topYear?.[0], stats.topYear?.[1], null);
-      habitTile("", "Top Creator", stats.topDirector?.[0], stats.topDirector?.[1], stats.topDirector?.[0]);
+      habitTile("", this.plugin.__isAnime ? "Top Studio" : "Top Creator", stats.topDirector?.[0], stats.topDirector?.[1], stats.topDirector?.[0]);
       habitTile("", "Most-Seen Actor", stats.topCast?.[0], stats.topCast?.[1], stats.topCast?.[0]);
     }
   }
 
-  renderGenrePie(container, topGenres) {
+  renderGenreBars(container, topGenres) {
     const max = Math.max(1, ...topGenres.map(([, count]) => count));
     const list = container.createDiv({ cls: "mg-genre-bars" });
     topGenres.forEach(([genre, count], i) => {
@@ -7276,6 +8780,51 @@ class MovieGallerySettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
+      .setName("Anime data file")
+      .setDesc("File (relative to vault root) where your anime are stored, e.g. anime.json. Changing this points the plugin at a different file; it doesn't rename or move the existing one.")
+      .addText((text) =>
+        text
+          .setPlaceholder("anime.json")
+          .setValue(this.plugin.settings.animeDataFile)
+          .onChange(async (value) => {
+            this.plugin.settings.animeDataFile = value.trim() || "anime.json";
+            await this.plugin.saveSettings();
+            this.plugin.refreshGalleries();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("MyAnimeList client ID (optional)")
+      .setDesc("Free from myanimelist.net/apiconfig (create an app, copy its Client ID). With it, MyAnimeList lookups use MAL's official API, which is usually faster than the Jikan service used otherwise. AniList needs no key. Voice cast comes from AniList; Jikan is only a fallback when AniList has none.")
+      .addText((text) => {
+        text.inputEl.type = "password";
+        text
+          .setPlaceholder("Leave empty to use Jikan")
+          .setValue(this.plugin.settings.malClientId || "")
+          .onChange(async (value) => {
+            this.plugin.settings.malClientId = value.trim();
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Anime title language")
+      .setDesc("Which name anime are shown under. Every other name is still searchable and shown in the details.")
+      .addDropdown((dd) =>
+        dd
+          .addOption("english", "English")
+          .addOption("romaji", "Romaji (e.g. Mirai Nikki)")
+          .addOption("native", "Japanese")
+          .setValue(this.plugin.settings.animeTitleLanguage || "english")
+          .onChange(async (value) => {
+            this.plugin.settings.animeTitleLanguage = value;
+            ANIME_TITLE_LANG = value;
+            await this.plugin.saveSettings();
+            this.plugin.refreshGalleries();
+          })
+      );
+
+    new Setting(containerEl)
       .setName("Collections file")
       .setDesc("File (relative to vault root) that stores your custom collections, e.g. collections.json")
       .addText((text) =>
@@ -7291,8 +8840,8 @@ class MovieGallerySettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Title notes folder")
-      .setDesc("Folder where \"Open note\" creates a note for a title, with its details as properties.")
+      .setName("MD notes folder")
+      .setDesc("Folder where the document-icon button in a title's details creates its Markdown note file, with its details as properties. (Your personal note stays inside TerroTrack.)")
       .addText((text) =>
         text
           .setPlaceholder("TerroTrack Notes")

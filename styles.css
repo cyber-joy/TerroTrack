@@ -249,12 +249,6 @@ body.theme-light .movie-filter-modal {
   font-weight: 700;
 }
 
-.movie-gallery-tabs .movie-gallery-tab.active {
-  background: var(--mg-accent);
-  color: #fff;
-  box-shadow: 0 1px 4px rgba(59, 130, 246, 0.35);
-}
-
 /* ---- Shells — the only visible frame ---- */
 .movie-gallery-tabs,
 .movie-gallery-segmented,
@@ -449,38 +443,6 @@ body.theme-light .movie-filter-modal {
    Genre pills
    ========================================================================== */
 
-.movie-gallery-genre-pill {
-  height: 30px;
-  padding: 0 10px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.8em;
-  line-height: 1;
-  box-sizing: border-box;
-  text-align: left;
-  white-space: nowrap;
-  background: rgba(var(--mg-fg), 0.06);
-  border: 1px solid var(--mg-border);
-  color: var(--mg-text-muted);
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-}
-
-.movie-gallery-genre-pill:hover {
-  background: rgba(var(--mg-fg), 0.1);
-  color: var(--mg-text);
-  border-color: var(--mg-border-strong);
-}
-
-.movie-gallery-genre-pill.selected {
-  background: var(--mg-accent);
-  border-color: var(--mg-accent);
-  color: #fff;
-}
-
-.movie-gallery-genre-pill.selected:hover {
-  background: var(--mg-accent-hover);
-}
-
 /* ==========================================================================
    Search wrapper + clear
    ========================================================================== */
@@ -536,34 +498,6 @@ body.theme-light .movie-filter-modal {
 /* ==========================================================================
    Legacy icon button
    ========================================================================== */
-
-.movie-gallery-icon-btn {
-  position: relative;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  cursor: pointer;
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--mg-text-muted);
-  box-sizing: border-box;
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-  flex-shrink: 0;
-}
-
-.movie-gallery-icon-btn:hover {
-  background: rgba(var(--mg-fg), 0.06);
-  border-color: var(--mg-border);
-  color: var(--mg-text);
-}
-
-.movie-gallery-icon-btn.has-value {
-  color: var(--mg-accent);
-}
 
 .movie-gallery-icon-badge {
   position: absolute;
@@ -847,27 +781,6 @@ body.theme-light .movie-filter-modal {
   max-width: 150px;
 }
 
-.movie-gallery-clear-btn {
-  height: 34px;
-  padding: 0 14px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.8em;
-  line-height: 1;
-  box-sizing: border-box;
-  margin-left: auto;
-  background: transparent;
-  border: 1px solid var(--mg-border);
-  color: var(--mg-text-muted);
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-}
-
-.movie-gallery-clear-btn:hover {
-  background: rgba(224, 85, 95, 0.1);
-  border-color: rgba(224, 85, 95, 0.5);
-  color: var(--mg-danger);
-}
-
 .movie-gallery-count {
   font-size: 0.7em;
   color: var(--mg-text-muted);
@@ -1063,17 +976,6 @@ body.theme-light .movie-filter-modal {
   color: var(--mg-text-muted);
   line-height: 1.35;
   margin-top: 3px;
-}
-
-.movie-gallery-overview-snippet,
-.movie-gallery-notes-snippet {
-  font-size: 0.78em;
-  color: var(--mg-text-muted);
-  margin-top: 4px;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
 }
 
 .movie-gallery-warning {
@@ -1732,122 +1634,6 @@ body.theme-light .movie-filter-modal {
   padding-top: 14px;
   margin-top: 2px;
   border-top: 1px solid rgba(var(--mg-fg), 0.06);
-}
-
-.movie-detail-status-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 5px 14px 5px 11px;
-  border-radius: 999px;
-  font-size: 0.8em;
-  font-weight: 600;
-  cursor: pointer;
-  background: rgba(217, 164, 65, 0.15);
-  color: var(--mg-tone-amber);
-  box-shadow: inset 0 0 0 1px rgba(217, 164, 65, 0.4);
-  transition: background 0.15s ease, box-shadow 0.15s ease;
-}
-
-.movie-detail-status-pill::before {
-  content: "";
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: currentColor;
-}
-
-.movie-detail-status-pill:hover { background: rgba(217, 164, 65, 0.25); }
-
-.movie-detail-status-pill.is-watched {
-  background: rgba(76, 175, 80, 0.15);
-  color: var(--mg-tone-green);
-  box-shadow: inset 0 0 0 1px rgba(76, 175, 80, 0.4);
-}
-
-.movie-detail-status-pill.is-watched:hover { background: rgba(76, 175, 80, 0.25); }
-
-.movie-detail-inline-select {
-  padding: 4px 10px;
-  border-radius: 6px;
-  background: rgba(var(--mg-fg), 0.05);
-  border: 1px solid rgba(var(--mg-fg), 0.1);
-  color: var(--mg-text);
-  font-size: 0.88em;
-  cursor: pointer;
-  outline: none !important;
-  min-width: 92px;
-  align-self: flex-start;
-}
-
-.movie-detail-inline-select:focus {
-  outline: none !important;
-  border-color: #3b82f6;
-}
-
-.movie-detail-episode-input {
-  width: 64px;
-  text-align: center;
-}
-
-.movie-detail-modal .movie-detail-episode-step {
-  width: 30px;
-  height: 30px;
-  box-shadow: none;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border-radius: 8px;
-  cursor: pointer;
-  background: rgba(var(--mg-fg), 0.06);
-  border: 1px solid rgba(var(--mg-fg), 0.18);
-  color: var(--mg-text);
-  font-size: 1em;
-  line-height: 1;
-  font-weight: 600;
-  transition: background 0.12s ease, border-color 0.12s ease;
-}
-
-.movie-detail-modal .movie-detail-episode-step:hover {
-  box-shadow: none;
-  background: rgba(59, 130, 246, 0.16);
-  border-color: rgba(59, 130, 246, 0.55);
-}
-
-.movie-detail-episode-step:disabled {
-  cursor: default;
-  opacity: 0.4;
-  background: rgba(var(--mg-fg), 0.06);
-  border-color: rgba(var(--mg-fg), 0.14);
-}
-
-.movie-detail-progress-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.movie-detail-progress-total {
-  font-size: 0.82em;
-  color: rgba(var(--mg-fg), 0.5);
-}
-
-.movie-detail-progress-track {
-  margin-top: 10px;
-  height: 5px;
-  border-radius: 3px;
-  background: rgba(var(--mg-fg), 0.08);
-  overflow: hidden;
-  width: 100%;
-}
-
-.movie-detail-progress-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #3b82f6, #8b5cf6);
-  border-radius: 3px;
-  transition: width 0.2s ease;
 }
 
 .movie-star-rating {
@@ -2568,7 +2354,6 @@ select.mg-dd-open { border-color: var(--mg-accent) !important; }
 
 .movie-heatmap-tile-value { font-size: 1.02em; font-weight: 700; color: var(--mg-text); font-variant-numeric: tabular-nums; }
 .movie-heatmap-tile-label { margin-top: 2px; font-size: 0.66em; text-transform: uppercase; letter-spacing: 0.06em; color: var(--mg-text-muted); }
-.movie-heatmap-note { margin-top: 10px; font-size: 0.72em; color: var(--mg-text-dim); }
 
 /* ==========================================================================
    Stats modal
@@ -2677,22 +2462,6 @@ select.mg-dd-open { border-color: var(--mg-accent) !important; }
   margin-bottom: 10px;
 }
 
-.movie-stats-rating-card-top {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.movie-stats-rating-card-star { font-size: 1.3em; color: var(--mg-tone-yellow); }
-.movie-stats-rating-card-value { font-size: 0.95em; font-weight: 700; color: var(--mg-tone-yellow); }
-
-.movie-stats-rating-card-label {
-  font-size: 0.68em;
-  color: var(--mg-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-
 .movie-stats-rating-trend {
   margin-top: 8px;
   padding-top: 6px;
@@ -2733,77 +2502,6 @@ select.mg-dd-open { border-color: var(--mg-accent) !important; }
   margin-bottom: 10px;
 }
 
-.movie-stats-donut-sm { width: 70px; height: 70px; }
-
-.movie-stats-donut {
-  position: relative;
-  width: 96px;
-  height: 96px;
-  border-radius: 50%;
-  margin: 0 auto 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-}
-
-.movie-stats-donut-hole {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 60px;
-  height: 60px;
-  border-radius: 50%;
-  background: #1a1a1e;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  line-height: 1.15;
-  box-sizing: border-box;
-}
-
-.movie-stats-donut-hole-sm { width: 44px; height: 44px; }
-.movie-stats-donut-total { font-size: 1.1em; font-weight: 700; }
-.movie-stats-donut-hole-sm .movie-stats-donut-total { font-size: 0.85em; }
-
-.movie-stats-donut-total-label {
-  font-size: 0.58em;
-  color: var(--mg-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-
-.movie-stats-mini-legend {
-  margin: 12px auto 0;
-  width: fit-content;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  align-items: flex-start;
-}
-
-.movie-stats-mini-legend-item {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 0.68em;
-  color: var(--mg-text-muted);
-  text-align: left;
-}
-
-.movie-stats-mini-legend-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.movie-stats-pie-wrap { display: flex; justify-content: center; margin: 0; }
-.movie-stats-pie-wrap svg { max-width: 100%; max-height: 170px; }
-
 .movie-stats-habits-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -2826,8 +2524,6 @@ select.mg-dd-open { border-color: var(--mg-accent) !important; }
   background: var(--mg-surface-hover);
   border-color: var(--mg-accent);
 }
-
-.movie-stats-habit-emoji { font-size: 1.15em; margin-bottom: 2px; }
 
 .movie-stats-habit-value {
   font-size: 0.76em;
@@ -2929,8 +2625,6 @@ select.mg-dd-open { border-color: var(--mg-accent) !important; }
     padding: 16px;
     gap: 16px;
   }
-  .movie-detail-inline-select,
-  .movie-detail-episode-input { width: auto; min-width: 72px; }
 
   .movie-star { width: 20px; height: 20px; }
   .movie-star-bg-svg,
@@ -3037,7 +2731,6 @@ select.mg-dd-open { border-color: var(--mg-accent) !important; }
    ========================================================================== */
 
 .mg-discover-bar { display: flex; align-items: center; gap: 12px; }
-.mg-discover-hint { flex: 1; font-size: 0.74em; color: var(--mg-text-dim); }
 
 .movie-gallery-block .mg-discover-refresh {
   display: inline-flex;
@@ -3247,7 +2940,6 @@ select.mg-dd-open { border-color: var(--mg-accent) !important; }
   .mg-card.is-skeleton { height: 192px; }
   .mg-dm-layout { flex-direction: column; align-items: center; }
   .mg-dm-poster { width: 150px; }
-  .mg-discover-hint { display: none; }
   .mg-discover-bar { justify-content: space-between; }
 }
 
@@ -3349,39 +3041,6 @@ select.mg-dd-open { border-color: var(--mg-accent) !important; }
    Search scope toggles (outside the search bar)
    ========================================================================== */
 
-.mg-scope-group {
-  display: inline-flex;
-  gap: 2px;
-  height: 32px;
-  padding: 3px;
-  border-radius: 9px;
-  background: rgba(var(--mg-fg), 0.045);
-  box-shadow: inset 0 0 0 1px rgba(var(--mg-fg), 0.13);
-  box-sizing: border-box;
-  flex-shrink: 0;
-}
-
-.movie-gallery-block .mg-scope-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 26px;
-  padding: 0;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: rgba(var(--mg-fg), 0.38);
-  cursor: pointer;
-  box-shadow: none;
-  transition: background 0.12s ease, color 0.12s ease;
-}
-
-.movie-gallery-block .mg-scope-btn svg { display: block; }
-.movie-gallery-block .mg-scope-btn:hover { background: rgba(var(--mg-fg), 0.08); color: rgba(var(--mg-fg), 0.8); box-shadow: none; }
-.movie-gallery-block .mg-scope-btn.on { background: rgba(59, 130, 246, 0.2); color: var(--mg-tone-blue); }
-.movie-gallery-block .mg-scope-btn.on:hover { background: rgba(59, 130, 246, 0.3); color: #fff; }
-
 /* ==========================================================================
    Heatmap: week / month / year / all time
    ========================================================================== */
@@ -3459,11 +3118,6 @@ select.mg-dd-open { border-color: var(--mg-accent) !important; }
 .movie-heatmap-daytile.lv2 { background: #1f4f96; color: var(--mg-tone-blue); }
 .movie-heatmap-daytile.lv3 { background: #3b82f6; color: #fff; }
 .movie-heatmap-daytile.lv4 { background: #8fbcff; color: #0b1b36; }
-
-.movie-heatmap-yearhead { display: flex; align-items: baseline; justify-content: space-between; margin: 16px 0 6px; }
-.movie-heatmap-yearhead:first-child { margin-top: 0; }
-.movie-heatmap-yearhead-year { font-size: 0.95em; font-weight: 700; }
-.movie-heatmap-yearhead-total { font-size: 0.74em; color: var(--mg-text-muted); }
 
 
 /* TV posters keep the heart above the season / episode pill, whether or not that pill is shown */
@@ -3952,7 +3606,8 @@ body.theme-light .mg-note-scrim { background: rgba(20, 22, 30, 0.35); }
 }
 
 .movie-detail-modal .mg-person:hover { color: var(--mg-tone-blue); text-decoration-color: currentColor; background: transparent; box-shadow: none; }
-.mg-person-sep { margin: 0 6px 0 0; color: var(--mg-text-muted); }
+.mg-person-item { display: inline-flex; align-items: baseline; white-space: nowrap; margin-right: 6px; }
+.mg-person-sep { margin: 0; color: var(--mg-text-muted); }
 
 .mg-person-chip {
   display: inline-flex;
@@ -4266,14 +3921,6 @@ body.theme-light .mg-week-pop { box-shadow: 0 14px 36px rgba(20, 22, 30, 0.22); 
 .mg-stats-modal-shell .movie-gallery-stats-modal { max-width: 100%; }
 
 /* genre ring: coloured legend instead of tiny leader labels */
-.movie-gallery-stats-modal .movie-stats-pie-legend-wrap {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  justify-content: flex-start;
-}
-.movie-gallery-stats-modal .movie-stats-pie-legend-wrap svg { flex-shrink: 0; width: 120px; height: 120px; max-height: none; }
-.movie-gallery-stats-modal .movie-stats-genre-legend { flex-direction: column; align-items: flex-start; gap: 5px; }
 .movie-gallery-stats-modal .movie-stats-genre-col { flex: 1.3; }
 
 /* ---- gallery card info: grouped, truncated, quiet ---- */
@@ -4293,7 +3940,6 @@ body.theme-light .mg-week-pop { box-shadow: 0 14px 36px rgba(20, 22, 30, 0.22); 
 }
 .movie-gallery-card .mg-chip-me { border-color: #3a68c2; color: var(--mg-accent); font-weight: 600; }
 .movie-gallery-card .mg-card-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.movie-stats-mini-legend.movie-stats-genre-legend { margin: 0; width: auto; }
 
 /* ===== Stats refinements (scoped so Obsidian/theme rules cannot override) ===== */
 .movie-gallery-stats-modal .movie-stats-breakdown-col { text-align: left; padding: 12px 14px; }
@@ -4331,15 +3977,31 @@ body.theme-light .mg-week-pop { box-shadow: 0 14px 36px rgba(20, 22, 30, 0.22); 
 .movie-gallery-stats-modal .movie-stats-habit-value { font-size: 0.95em; margin-bottom: 2px; }
 .movie-gallery-stats-modal .movie-stats-habit-count { font-size: 0.7em; color: var(--mg-text-muted); }
 
-/* details: rating source label (scoped, no size change to the modal) */
-.movie-detail-modal .movie-detail-rating-src {
-  font-size: 0.78em;
+/* details: split rating pill = source | value (scoped, no size change to the modal) */
+.movie-detail-modal .movie-detail-rating-pill {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  vertical-align: middle;
+}
+.movie-detail-modal .movie-detail-rating-pill > span {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 11px;
+  line-height: 1.4;
+}
+.movie-detail-modal .movie-detail-rating-pill > .movie-detail-rating-src {
+  background: rgba(var(--mg-fg), 0.1);
+  color: var(--mg-text-muted);
+  font-size: 0.8em;
   font-weight: 600;
-  letter-spacing: 0.04em;
-  opacity: 0.8;
-  padding-right: 6px;
-  margin-right: 2px;
-  border-right: 1px solid rgba(234, 179, 8, 0.35);
+  letter-spacing: 0.02em;
+  padding: 3px 9px;
+  margin: 0;
+  border: 0;
+  opacity: 1;
 }
 
 /* gallery cards: left-align text under the poster */
@@ -4348,3 +4010,448 @@ body.theme-light .mg-week-pop { box-shadow: 0 14px 36px rgba(20, 22, 30, 0.22); 
 .movie-gallery-card .mg-card-chips { text-align: left; justify-content: flex-start; }
 .movie-gallery-card { align-items: stretch; text-align: left; }
 .movie-gallery-card .movie-gallery-poster-wrap { width: 100%; }
+
+/* ---- anime details: alternate names, related titles ---- */
+.movie-detail-modal .movie-detail-alt-names { color: var(--mg-text-muted); font-size: 0.85em; margin: -2px 0 6px; line-height: 1.35; }
+.movie-detail-modal .movie-progress-counters.is-single { grid-template-columns: 1fr; }
+.movie-detail-modal .mg-related-card { cursor: pointer; }
+.movie-detail-modal .mg-related-rel {
+  position: absolute; left: 6px; top: 6px; padding: 1px 7px; border-radius: 6px;
+  background: rgba(0, 0, 0, 0.72); color: #fff; font-size: 0.68em; font-weight: 600; line-height: 1.5;
+}
+.movie-detail-modal .mg-related-meta { font-size: 0.72em; color: var(--mg-text-muted); margin-top: 2px; }
+
+/* anime: voice cast status row */
+.movie-detail-modal .mg-cast-status { display: flex; align-items: center; gap: 10px; color: var(--mg-text-muted); font-size: 0.88em; }
+.movie-detail-modal .mg-cast-retry {
+  background: transparent; color: var(--mg-text); border: 1px solid rgba(var(--mg-fg), 0.2);
+  border-radius: 6px; padding: 1px 10px; height: 24px; font-size: 0.85em; box-shadow: none; cursor: pointer;
+}
+.mg-bulkbar .mg-bulk-btn:disabled { opacity: 0.6; cursor: default; }
+
+/* ===== Anime details: big poster and voice cast on the left ===== */
+.movie-detail-modal.mg-ad .mg-ad-layout { display: flex; gap: 18px; align-items: flex-start; }
+.movie-detail-modal.mg-ad .mg-ad-left { flex: 0 0 190px; width: 190px; display: flex; flex-direction: column; gap: 8px; }
+.movie-detail-modal.mg-ad .mg-ad-poster {
+  width: 190px; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 12px; display: block;
+  background: rgba(var(--mg-fg), 0.08); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.movie-detail-modal.mg-ad .mg-ad-right { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.movie-detail-modal.mg-ad .mg-ad-right > * { margin-top: 0; margin-bottom: 0; }
+.movie-detail-modal.mg-ad .movie-detail-title { margin: 0; text-align: left; font-size: 1.5em; line-height: 1.15; }
+.movie-detail-modal.mg-ad .movie-detail-alt-names { margin: -6px 0 0; }
+.movie-detail-modal.mg-ad .movie-detail-subtitle { margin: 0; }
+.movie-detail-modal.mg-ad .mg-ad-genres { display: flex; flex-wrap: wrap; gap: 5px; }
+.movie-detail-modal.mg-ad .mg-ad-chip {
+  padding: 1px 9px; border-radius: 999px; font-size: 0.75em; line-height: 1.6;
+  border: 1px solid rgba(var(--mg-fg), 0.16); color: var(--mg-text-muted);
+}
+.movie-detail-modal.mg-ad .mg-ad-overview { line-height: 1.5; color: var(--mg-text); opacity: 0.85; font-size: 0.92em; }
+.movie-detail-modal.mg-ad .mg-ad-overview.is-clamped { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.movie-detail-modal.mg-ad .mg-ad-more { font-size: 0.8em; display: inline-block; }
+.movie-detail-modal.mg-ad .mg-ad-facts {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px 14px; padding: 10px 14px;
+  border-radius: 12px; background: rgba(var(--mg-fg), 0.045);
+}
+.movie-detail-modal.mg-ad .mg-ad-fact { min-width: 0; }
+.movie-detail-modal.mg-ad .mg-ad-fact .movie-detail-fact-label { margin: 0 0 1px; }
+.movie-detail-modal.mg-ad .mg-ad-fact-value { font-size: 0.9em; }
+
+/* the progress card as one compact row */
+.movie-detail-modal.mg-ad .movie-progress-card {
+  display: grid; grid-template-columns: auto 1fr auto; grid-template-areas: "cnt trk pct" "foot foot foot";
+  align-items: center; gap: 4px 12px; margin: 0; padding: 9px 14px; border-radius: 12px;
+}
+.movie-detail-modal.mg-ad .movie-progress-head { display: contents; }
+.movie-detail-modal.mg-ad .movie-progress-head .movie-detail-fact-label { display: none; }
+.movie-detail-modal.mg-ad .movie-progress-pct { grid-area: pct; }
+.movie-detail-modal.mg-ad .movie-progress-counters { grid-area: cnt; }
+.movie-detail-modal.mg-ad .movie-progress-track { grid-area: trk; }
+.movie-detail-modal.mg-ad .movie-progress-foot { grid-area: foot; font-size: 0.85em; }
+
+.movie-detail-modal.mg-ad .mg-ad-statusrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.movie-detail-modal.mg-ad .mg-ad-statusrow .movie-detail-status-row { margin: 0; }
+.movie-detail-modal.mg-ad .mg-ad-label {
+  margin: 0 0 6px; font-size: 0.68em; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--mg-text-muted);
+}
+
+/* voice cast list under the poster */
+.movie-detail-modal.mg-ad .mg-ad-cast { padding: 10px 12px; border-radius: 12px; background: rgba(var(--mg-fg), 0.045); }
+.movie-detail-modal.mg-ad .mg-ad-person { display: flex; align-items: center; gap: 8px; padding: 3px 0; cursor: pointer; min-width: 0; }
+.movie-detail-modal.mg-ad .mg-ad-person:hover .mg-ad-actor { text-decoration: underline; }
+.movie-detail-modal.mg-ad .mg-ad-face {
+  width: 28px; height: 28px; flex: none; border-radius: 50%; overflow: hidden;
+  display: flex; align-items: center; justify-content: center; font-size: 0.72em; font-weight: 700; color: #fff;
+}
+.movie-detail-modal.mg-ad .mg-ad-face img { width: 100%; height: 100%; object-fit: cover; }
+.movie-detail-modal.mg-ad .mg-ad-names { min-width: 0; line-height: 1.2; }
+.movie-detail-modal.mg-ad .mg-ad-actor, .movie-detail-modal.mg-ad .mg-ad-char { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.movie-detail-modal.mg-ad .mg-ad-actor { font-size: 0.78em; }
+.movie-detail-modal.mg-ad .mg-ad-char { font-size: 0.68em; color: var(--mg-text-muted); }
+.movie-detail-modal.mg-ad .mg-ad-cast .mg-ad-more { margin-top: 4px; }
+
+/* related: a row of posters */
+.movie-detail-modal.mg-ad .mg-ad-related { padding: 10px 12px; border-radius: 12px; background: rgba(var(--mg-fg), 0.045); }
+.movie-detail-modal.mg-ad .mg-ad-related .movie-detail-similar-list {
+  display: flex !important; flex-wrap: nowrap; gap: 8px; overflow-x: auto; padding-bottom: 4px; margin: 0;
+}
+.movie-detail-modal.mg-ad .mg-ad-related .movie-detail-similar-card { flex: 0 0 70px; width: 70px; }
+
+/* under both columns: the buttons, then similar titles */
+.movie-detail-modal.mg-ad .mg-ad-bottom { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(var(--mg-fg), 0.08); }
+.movie-detail-modal.mg-ad .mg-ad-bottom .movie-detail-actions { margin: 0 0 12px; border: 0; padding: 0; }
+.movie-detail-modal.mg-ad .mg-ad-bottom .movie-detail-similar-section { margin: 0; padding: 0; border: 0; }
+.movie-detail-modal.mg-ad .mg-ad-bottom .movie-detail-section-title {
+  margin: 0 0 6px; font-size: 0.68em; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--mg-text-muted);
+}
+.movie-detail-modal.mg-ad .mg-ad-bottom .movie-detail-similar-list {
+  display: flex !important; flex-wrap: nowrap; gap: 8px; overflow-x: auto; padding-bottom: 4px;
+}
+.movie-detail-modal.mg-ad .mg-ad-bottom .movie-detail-similar-card { flex: 0 0 64px; width: 64px; }
+
+
+/* trim: one-line progress, posters with a single-line title, tighter gaps */
+.movie-detail-modal.mg-ad .movie-progress-card { grid-template-columns: auto 1fr auto auto; grid-template-areas: "cnt trk pct foot"; padding: 8px 12px; }
+.movie-detail-modal.mg-ad .movie-progress-foot { font-size: 0; }
+.movie-detail-modal.mg-ad .movie-progress-foot > * { font-size: 12px; }
+.movie-detail-modal.mg-ad .mg-ad-right { gap: 8px; }
+.movie-detail-modal.mg-ad .mg-ad-related .mg-related-meta { display: none; }
+.movie-detail-modal.mg-ad .mg-ad-related .movie-detail-similar-card { flex-basis: 64px; width: 64px; }
+.movie-detail-modal.mg-ad .movie-detail-similar-title { font-size: 0.7em; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 3px; }
+.movie-detail-modal.mg-ad .mg-ad-bottom { margin-top: 10px; padding-top: 10px; }
+.movie-detail-modal.mg-ad .mg-ad-bottom .movie-detail-actions { margin-bottom: 8px; }
+.movie-detail-modal.mg-ad .mg-ad-bottom .movie-detail-similar-card { flex-basis: 54px; width: 54px; }
+.movie-detail-modal.mg-ad .mg-ad-person { padding: 2px 0; }
+
+.movie-detail-modal.mg-ad .movie-progress-foot-text { display: none; }
+.movie-detail-modal.mg-ad .movie-counter { padding: 4px 10px; gap: 12px; }
+.movie-detail-modal.mg-ad .movie-detail-subtitle { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 8px; }
+.movie-detail-modal.mg-ad .mg-ad-left .movie-note-card, .movie-detail-modal.mg-ad .mg-ad-left .movie-note-chip { width: 100%; box-sizing: border-box; }
+
+.movie-detail-modal.mg-ad .mg-ad-left .movie-note-card { margin: 0; width: 100%; box-sizing: border-box; }
+
+/* Obsidian's .modal sets its own (narrower) width, so the two-column anime window overrides it,
+   the same way the filter window does. */
+.modal.mg-ad-shell { width: 680px !important; max-width: 94vw !important; }
+.movie-detail-modal.mg-ad { max-width: none; width: 100%; }
+/* the status buttons wrap instead of being cut off when the column is narrow */
+.movie-detail-modal.mg-ad .mg-ad-statusrow .movie-detail-status-row { flex-wrap: wrap; max-width: 100%; }
+.movie-detail-modal.mg-ad .mg-ad-statusrow .mg-status-seg { flex-wrap: wrap; max-width: 100%; }
+.movie-detail-modal.mg-ad .mg-ad-right { overflow-x: hidden; }
+@media (max-width: 820px) {
+  .movie-detail-modal.mg-ad .mg-ad-left { flex-basis: 160px; width: 160px; }
+  .movie-detail-modal.mg-ad .mg-ad-poster { width: 160px; }
+}
+
+/* progress: the episode counter on top, the bar (with its percentage) underneath */
+.movie-detail-modal.mg-ad .movie-progress-card {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "cnt foot" "trk pct";
+  align-items: center; gap: 8px 12px; padding: 10px 12px;
+}
+.movie-detail-modal.mg-ad .movie-progress-counters { grid-area: cnt; min-width: 0; }
+.movie-detail-modal.mg-ad .movie-progress-foot { grid-area: foot; justify-self: end; flex-wrap: wrap; }
+.movie-detail-modal.mg-ad .movie-progress-track { grid-area: trk; margin: 0; }
+.movie-detail-modal.mg-ad .movie-progress-pct { grid-area: pct; justify-self: end; min-width: 2.4em; text-align: right; }
+.movie-detail-modal.mg-ad .movie-progress-foot { margin: 0; padding: 0; border: 0; }
+
+/* ==========================================================================
+   Phones and narrow windows
+   ========================================================================== */
+
+/* wide windows use the full width of a phone instead of 94% of it */
+@media (max-width: 720px) {
+  .modal.mg-ad-shell, .modal.movie-filter-modal-shell, .modal.mg-stats-modal-shell { width: 100% !important; max-width: 100% !important; }
+}
+
+/* ---- Anime details on a phone: small poster beside the title, everything else in one column ---- */
+@media (max-width: 560px) {
+  .movie-detail-modal.mg-ad .mg-ad-layout { display: grid; grid-template-columns: 96px minmax(0, 1fr); column-gap: 12px; row-gap: 10px; align-items: start; }
+  .movie-detail-modal.mg-ad .mg-ad-left, .movie-detail-modal.mg-ad .mg-ad-right { display: contents; }
+  .movie-detail-modal.mg-ad .mg-ad-left > *, .movie-detail-modal.mg-ad .mg-ad-right > * { grid-column: 1 / -1; min-width: 0; margin: 0; }
+  .movie-detail-modal.mg-ad .mg-ad-left > .mg-ad-poster { grid-column: 1; grid-row: 1 / span 4; width: 96px; border-radius: 10px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35); }
+  .movie-detail-modal.mg-ad .mg-ad-right > .movie-detail-title { grid-column: 2; grid-row: 1; font-size: 1.2em; align-self: start; }
+  .movie-detail-modal.mg-ad .mg-ad-right > .movie-detail-alt-names { grid-column: 2; grid-row: 2; font-size: 0.78em; }
+  .movie-detail-modal.mg-ad .mg-ad-right > .movie-detail-subtitle { grid-column: 2; grid-row: 3; justify-content: flex-start; text-align: left; align-self: start; }
+  /* voice cast and the note come after the facts, progress and status */
+  .movie-detail-modal.mg-ad .mg-ad-left > .mg-ad-cast { order: 20; display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; }
+  .movie-detail-modal.mg-ad .mg-ad-cast > .mg-ad-label, .movie-detail-modal.mg-ad .mg-ad-cast > .mg-ad-more, .movie-detail-modal.mg-ad .mg-ad-cast > .mg-cast-status { grid-column: 1 / -1; }
+  .movie-detail-modal.mg-ad .mg-ad-left > .movie-note-card, .movie-detail-modal.mg-ad .mg-ad-left > .movie-note-chip { order: 21; }
+  .movie-detail-modal.mg-ad .mg-ad-facts { grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); padding: 9px 12px; }
+  /* progress: counter, then bar; the date chip drops below */
+  .movie-detail-modal.mg-ad .movie-progress-card { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "cnt cnt" "trk pct" "foot foot"; }
+  .movie-detail-modal.mg-ad .movie-progress-foot { justify-self: start; }
+  .movie-detail-modal.mg-ad .movie-counter { width: 100%; box-sizing: border-box; }
+  /* status buttons share one line; heart and stars sit together beneath */
+  .movie-detail-modal.mg-ad .mg-ad-statusrow { gap: 8px 10px; }
+  .movie-detail-modal.mg-ad .mg-ad-statusrow .movie-detail-status-row { width: 100%; flex-wrap: nowrap; gap: 8px; }
+  .movie-detail-modal.mg-ad .mg-ad-statusrow .mg-status-seg { flex: 1 1 auto; min-width: 0; flex-wrap: nowrap; }
+  .movie-detail-modal.mg-ad .mg-ad-statusrow .mg-status-opt { flex: 1 1 0; min-width: 0; justify-content: center; padding: 0 4px; gap: 4px; font-size: 0.74em; }
+  /* actions: Edit and Update share the row with the three icon buttons */
+  .movie-detail-modal.mg-ad .mg-ad-bottom .movie-detail-actions { flex-wrap: nowrap; gap: 8px; }
+  .movie-detail-modal.mg-ad .mg-ad-bottom .movie-detail-actions button { flex: 1 1 0; min-width: 0; padding: 0 8px; min-height: 40px; }
+  .movie-detail-modal.mg-ad .mg-ad-bottom .movie-detail-actions button.is-icon { flex: 0 0 40px; width: 40px; }
+}
+
+/* ---- Classic (movie / TV) details on a phone ---- */
+@media (max-width: 560px) {
+  .movie-detail-modal .mg-status-seg { flex-wrap: wrap; }
+  .movie-detail-modal .movie-detail-status-row { min-width: 0; max-width: 100%; }
+  .movie-detail-modal .movie-detail-actions { flex-wrap: nowrap; gap: 8px; padding-left: 12px; padding-right: 12px; }
+  .movie-detail-modal .movie-detail-actions button { flex: 1 1 0; min-width: 0; padding: 0 8px; }
+  .movie-detail-modal .movie-detail-actions button.is-icon { flex: 0 0 40px; width: 40px; }
+}
+
+/* ---- Library screens on a phone ---- */
+@media (max-width: 600px) {
+  /* five tabs don't fit with labels: only the open tab keeps its name */
+  .mg-tabs { max-width: 100%; box-sizing: border-box; }
+  .movie-gallery-block .mg-tab:not(.active) .mg-tab-label { display: none; }
+  .movie-gallery-block .mg-tab:not(.active) { flex: 0 0 auto; padding: 0 14px; }
+  .movie-gallery-block .mg-tab.active { flex: 1 1 auto; }
+  .mg-bulkbar { flex-wrap: wrap; max-width: 100%; box-sizing: border-box; }
+  .mg-list { width: 100%; box-sizing: border-box; }
+}
+@media (max-width: 480px) {
+  /* a tighter toolbar: search, status, then sort + views, then tools + Add */
+  .movie-gallery-toolbar { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .movie-gallery-toolbar-left { display: contents; }
+  .movie-gallery-search-wrap { flex: 1 1 100%; }
+  .movie-gallery-segmented { flex: 1 1 100%; width: 100%; overflow-x: auto; }
+  .movie-gallery-segmented .movie-gallery-segment { padding: 0 7px; font-size: 0.76em; }
+  .movie-gallery-segmented .movie-gallery-segment.selected { padding: 0 9px; margin: 3px 2px; }
+  .movie-gallery-sort-group { flex: 1 1 150px; min-width: 150px; }
+  .movie-gallery-sort-group .movie-gallery-sort-select { flex: 1 1 auto; min-width: 0; max-width: none; }
+  .movie-gallery-toolbar-right { flex: 0 0 auto; margin-left: auto; align-self: center; }
+  .movie-gallery-add-btn { min-height: 34px; }
+}
+
+@media (max-width: 600px) {
+  .mg-list th, .mg-list td { padding-left: 6px; padding-right: 6px; }
+  .mg-list-sub { max-width: 44vw; }
+}
+
+@media (max-width: 560px) {
+  .movie-gallery-settings-modal, .movie-add-modal, .movie-gallery-stats-modal, .movie-filter-modal { box-sizing: border-box; max-width: 100%; }
+}
+
+@media (max-width: 560px) {
+  .movie-add-modal input, .movie-add-modal select, .movie-add-modal textarea { box-sizing: border-box; max-width: 100%; }
+}
+
+/* ==========================================================================
+   Anime details window: small adjustments
+   ========================================================================== */
+
+/* percentage sits right after the bar */
+.movie-detail-modal.mg-ad .movie-progress-pct { justify-self: start; text-align: left; }
+
+/* related titles: smaller posters in a block that scrolls up and down */
+.movie-detail-modal.mg-ad .mg-ad-related .movie-detail-similar-list {
+  display: grid !important; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 10px;
+  max-height: 240px; overflow-x: hidden; overflow-y: auto; padding: 0 4px 0 0; align-items: start;
+}
+.movie-detail-modal.mg-ad .mg-ad-related .movie-detail-similar-card { flex: none; width: auto; }
+
+/* similar titles: wrapped rows, the same as the movie and TV windows */
+.movie-detail-modal.mg-ad .mg-ad-bottom .movie-detail-similar-list {
+  display: grid !important; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 12px;
+  overflow: visible; padding: 0; align-items: start;
+}
+.movie-detail-modal.mg-ad .mg-ad-bottom .movie-detail-similar-card { flex: none; width: auto; }
+
+/* full titles under related and similar posters */
+.movie-detail-modal.mg-ad .movie-detail-similar-title {
+  display: block; -webkit-line-clamp: unset; white-space: normal; overflow: visible; text-overflow: clip;
+  overflow-wrap: anywhere; font-size: 0.76em; line-height: 1.3; margin-top: 5px;
+}
+
+/* genres sit on their own row under the title block */
+.movie-detail-modal.mg-ad .mg-ad-genres { display: flex; flex-wrap: wrap; gap: 6px; }
+@media (max-width: 560px) {
+  .movie-detail-modal.mg-ad .mg-ad-right > .mg-ad-genres { grid-column: 2; grid-row: 4; align-self: start; }
+}
+
+/* ==========================================================================
+   Movie and TV details: three-column facts, a little more compact
+   ========================================================================== */
+.movie-detail-modal:not(.mg-ad) .movie-detail-layout { gap: 20px; padding: 18px 20px 0; }
+.movie-detail-modal:not(.mg-ad) .movie-detail-facts { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 22px; padding: 14px 20px; margin: 14px 20px 0; }
+.movie-detail-modal:not(.mg-ad) .movie-detail-fact-label { margin-bottom: 3px; }
+.movie-detail-modal:not(.mg-ad) .movie-detail-fact-cast { border-top: none; padding-top: 0; margin-top: 0; }
+
+/* favourites: a heart button, the words move to the tooltip */
+.movie-detail-modal:not(.mg-ad) .movie-detail-fav-btn { padding: 0; width: 32px; height: 32px; justify-content: center; }
+.movie-detail-modal:not(.mg-ad) .movie-detail-fav-btn span { display: none; }
+.movie-detail-modal:not(.mg-ad) .movie-detail-fav-btn svg { width: 15px; height: 15px; }
+
+@media (max-width: 560px) {
+  .movie-detail-modal:not(.mg-ad) .movie-detail-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 12px 0 0; }
+  .movie-detail-modal:not(.mg-ad) .movie-detail-fact-rating, .movie-detail-modal:not(.mg-ad) .movie-detail-fact-cast { grid-column: 1 / -1; }
+}
+
+/* ==========================================================================
+   Discover: cleaner and more compact (same look, less space)
+   ========================================================================== */
+.mg-discover-spacer { flex: 1; }
+.movie-gallery-block .mg-discover-refresh { width: 32px; padding: 0; justify-content: center; }
+.mg-discover-refresh span { display: none; }
+.mg-discover-foot { margin-top: 4px; padding-bottom: 4px; text-align: center; font-size: 0.7em; color: var(--mg-text-dim); }
+
+.mg-discover { gap: 0; margin-top: 6px; }
+.mg-row { margin-bottom: 6px; }
+.mg-row-head { align-items: baseline; margin-bottom: 2px; }
+.mg-row-titles { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.mg-row-title { font-size: 1em; white-space: nowrap; }
+.mg-row-sub { margin: 0; font-size: 0.74em; color: var(--mg-text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.movie-gallery-block .mg-row-arrow { width: 26px; height: 26px; border-radius: 50%; border-color: rgba(var(--mg-fg), 0.1); }
+.mg-row-track { gap: 12px; padding: 4px 2px 8px; }
+
+.mg-card { flex-basis: 132px; }
+.mg-card-poster { border-radius: 8px; box-shadow: none; }
+.mg-card:hover .mg-card-poster { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4); }
+.mg-card-rating { left: 5px; bottom: 5px; padding: 1px 6px; font-size: 0.66em; background: rgba(0, 0, 0, 0.6); }
+.mg-card-add { top: 5px; right: 5px; width: 24px; height: 24px; font-size: 0.9em; }
+.mg-card-title { margin-top: 6px; font-size: 0.8em; -webkit-line-clamp: 1; }
+.mg-card-meta { margin-top: 1px; font-size: 0.7em; color: var(--mg-text-dim); }
+.mg-card-reason { margin-top: 2px; -webkit-line-clamp: 1; }
+.mg-card.is-skeleton { height: 198px; border-radius: 8px; }
+@media (max-width: 600px) {
+  .mg-card { flex-basis: 118px; }
+  .mg-card.is-skeleton { height: 177px; }
+  .mg-row-sub { display: none; }
+}
+.mg-discover-bar .movie-gallery-segmented .movie-gallery-segment { padding: 0 14px; }
+
+/* ==========================================================================
+   Movie and TV details: full-width status line, compact progress, aligned
+   buttons
+   ========================================================================== */
+/* status buttons stretch; the date chip and the heart stay on the same line */
+.movie-detail-modal:not(.mg-ad) .movie-detail-status-row { flex-wrap: nowrap; gap: 8px; }
+.movie-detail-modal:not(.mg-ad) .movie-detail-status-row .mg-status-seg { flex: 1 1 auto; min-width: 0; }
+.movie-detail-modal:not(.mg-ad) .movie-detail-status-row .mg-status-opt { flex: 1 1 0; min-width: 0; justify-content: center; padding-left: 8px; padding-right: 8px; }
+.movie-detail-modal:not(.mg-ad) .movie-detail-status-row > :not(.mg-status-seg) { flex: none; }
+
+/* TV progress: counters, then the bar with its percentage and the date chip (like the anime window) */
+.movie-detail-modal:not(.mg-ad) .movie-progress-card {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "cnt cnt cnt" "trk pct foot";
+  align-items: center; gap: 10px 12px; padding: 10px 14px;
+}
+.movie-detail-modal:not(.mg-ad) .movie-progress-head { display: contents; }
+.movie-detail-modal:not(.mg-ad) .movie-progress-head .movie-detail-fact-label { display: none; }
+.movie-detail-modal:not(.mg-ad) .movie-progress-counters { grid-area: cnt; min-width: 0; }
+.movie-detail-modal:not(.mg-ad) .movie-progress-track { grid-area: trk; margin: 0; }
+.movie-detail-modal:not(.mg-ad) .movie-progress-pct { grid-area: pct; min-width: 2.4em; text-align: left; }
+.movie-detail-modal:not(.mg-ad) .movie-progress-foot { grid-area: foot; margin: 0; padding: 0; border: 0; font-size: 0; }
+.movie-detail-modal:not(.mg-ad) .movie-progress-foot > * { font-size: 12px; }
+.movie-detail-modal:not(.mg-ad) .movie-progress-foot-text { display: none; }
+
+/* buttons line up with the cards above (same 20px edge) */
+@media (min-width: 561px) {
+  .movie-detail-modal:not(.mg-ad) .movie-detail-actions { padding: 16px 20px 22px; }
+}
+@media (max-width: 560px) {
+  .movie-detail-modal:not(.mg-ad) .movie-detail-status-row { flex-wrap: wrap; }
+  .movie-detail-modal:not(.mg-ad) .movie-detail-status-row .mg-status-seg { flex: 1 1 100%; }
+  .movie-detail-modal:not(.mg-ad) .movie-detail-status-row .mg-status-opt { font-size: 0.74em; padding-left: 4px; padding-right: 4px; gap: 4px; }
+}
+
+
+/* ==========================================================================
+   Movie and TV details at the real dialog width (about 560px)
+   ========================================================================== */
+/* status: the buttons keep their natural width, the heart sits beside them */
+.movie-detail-modal:not(.mg-ad) .movie-detail-status-row .mg-status-seg { flex: 1 1 auto; min-width: max-content; }
+.movie-detail-modal:not(.mg-ad) .movie-detail-status-row .mg-status-opt { flex: 1 1 auto; min-width: max-content; padding-left: 10px; padding-right: 10px; }
+
+/* my rating on the left, the watched date on the right of the same line */
+.movie-detail-modal:not(.mg-ad) .movie-detail-fact-rating { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; align-items: center; }
+.movie-detail-modal:not(.mg-ad) .movie-detail-fact-rating > :not(.movie-detail-rating-aux) { grid-column: 1; }
+.movie-detail-modal:not(.mg-ad) .movie-detail-rating-aux { grid-column: 2; grid-row: 1 / span 2; justify-self: end; }
+.movie-detail-modal:not(.mg-ad) .movie-detail-rating-aux:empty { display: none; }
+
+/* TV counters: slimmer so both fit side by side */
+.movie-detail-modal:not(.mg-ad) .movie-progress-counters { gap: 8px; }
+.movie-detail-modal:not(.mg-ad) .movie-counter { padding: 8px 10px; gap: 6px; }
+.movie-detail-modal:not(.mg-ad) .movie-counter-step { width: 26px; height: 26px; }
+.movie-detail-modal:not(.mg-ad) .movie-counter-input { width: 36px; height: 26px; }
+.movie-detail-modal:not(.mg-ad) .movie-counter-stepper { gap: 2px; }
+
+/* progress: time left sits beside the percentage */
+.movie-progress-pct { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.movie-progress-left { font-size: 0.7em; font-weight: 500; color: var(--mg-text-dim); }
+@media (max-width: 560px) {
+  .movie-detail-modal:not(.mg-ad) .movie-progress-card { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "cnt cnt" "trk pct" "foot foot"; }
+}
+
+/* ==========================================================================
+   Stats: one window that fits without scrolling
+   ========================================================================== */
+.mg-stats-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+.mg-stats-head h2 { margin: 0; }
+/* one scrollbar only: the window itself never scrolls, the content does (its bar space is reserved so nothing jumps) */
+.mg-stats-modal-shell { max-height: 94vh !important; overflow: hidden !important; }
+.mg-stats-modal-shell .movie-gallery-stats-modal {
+  max-height: calc(94vh - 40px); overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable;
+  scrollbar-width: thin; scrollbar-color: rgba(var(--mg-fg), 0.2) transparent;
+}
+
+/* heatmap: title, period tabs and navigation share the first line; legend and tiles are tighter */
+.movie-gallery-stats-modal .movie-heatmap { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 4px 0 8px; padding: 10px 14px; }
+.movie-gallery-stats-modal .movie-heatmap > * { flex: 1 1 100%; margin: 0; min-width: 0; }
+.movie-gallery-stats-modal .movie-heatmap > .movie-heatmap-head { flex: 1 1 auto; min-width: 200px; }
+.movie-gallery-stats-modal .movie-heatmap > .movie-heatmap-bar { flex: 0 1 auto; flex-wrap: nowrap; }
+.movie-gallery-stats-modal .movie-heatmap > .movie-heatmap-tip { flex: none; }
+.movie-gallery-stats-modal .movie-heatmap-grid { gap: 2px; }
+.movie-gallery-stats-modal .movie-heatmap-tile { padding: 6px 10px; }
+
+/* the rest of the window */
+.movie-gallery-stats-modal .movie-stats-banner-hero { padding-top: 10px; padding-bottom: 10px; margin-bottom: 8px; }
+.movie-gallery-stats-modal .movie-stats-cards { margin-bottom: 8px; }
+.movie-gallery-stats-modal .movie-stats-breakdown-row { margin-bottom: 8px; }
+.movie-gallery-stats-modal .movie-gallery-settings-section-title + .movie-gallery-settings-desc { display: none; }
+.movie-gallery-stats-modal .movie-heatmap-grid .movie-heatmap-cell { aspect-ratio: auto; height: 10px; border-radius: 2px; }
+.movie-gallery-stats-modal .mg-genre-bars { gap: 4px; }
+.movie-gallery-stats-modal .movie-stats-habit-tile { padding: 8px 12px; }
+.movie-gallery-stats-modal .movie-stats-banner-hero { padding-top: 6px; padding-bottom: 6px; }
+.movie-gallery-stats-modal .movie-stats-banner-hero .movie-stats-banner-value { font-size: 1.7em; }
+.movie-gallery-stats-modal .movie-stats-banner-hero .movie-stats-banner-emoji { font-size: 1.7em; margin-bottom: 0; }
+
+/* ==========================================================================
+   Stats switch + cast: beat Obsidian's default button look (it sets a 30px height)
+   ========================================================================== */
+.mg-stats-head .movie-heatmap-seg-btn {
+  height: 24px; padding: 0 12px; border: none; border-radius: 6px; background: transparent;
+  color: var(--mg-text-muted); font-family: inherit; font-size: 0.78em; font-weight: 600; cursor: pointer;
+  box-shadow: none; transition: background 0.15s ease, color 0.15s ease;
+}
+.mg-stats-head .movie-heatmap-seg-btn:hover { color: var(--mg-strong); background: rgba(var(--mg-fg), 0.06); box-shadow: none; }
+.mg-stats-head .movie-heatmap-seg-btn.selected { background: rgba(var(--mg-fg), 0.17); color: var(--mg-strong); }
+
+/* cast: names are text, so rows are text-height and the size matches the other facts */
+.movie-detail-fact-cast .movie-detail-fact-value { font-size: 0.82em; line-height: 1.4; }
+.movie-detail-modal .mg-person { height: auto; min-height: 0; line-height: inherit; }
+.movie-detail-fact-cast .mg-people { gap: 0; }
+
+/* stats on a phone: the period tabs and the date navigation wrap instead of running past the edge */
+@media (max-width: 600px) {
+  .movie-gallery-stats-modal .movie-heatmap > .movie-heatmap-bar { flex: 1 1 100%; flex-wrap: wrap; justify-content: space-between; row-gap: 8px; }
+  .mg-stats-head { flex-wrap: wrap; }
+}
+
+/* ==========================================================================
+   Heatmap, all time: years across, months down, one cell per month
+   ========================================================================== */
+.movie-heatmap-matrix { display: flex; align-items: flex-start; gap: 8px; }
+.movie-heatmap-mlabels, .movie-heatmap-mgrid { display: grid; grid-auto-rows: 12px; row-gap: 2px; }
+.movie-heatmap-mgrid { column-gap: 2px; justify-content: start; }
+.movie-heatmap-mlabels { flex: none; text-align: right; font-size: 0.66em; line-height: 12px; color: var(--mg-text-muted); }
+.movie-heatmap-mhead, .movie-heatmap-mfoot { font-size: 0.66em; line-height: 12px; text-align: center; color: var(--mg-text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.movie-heatmap-mlabels .movie-heatmap-mfoot { text-align: right; }
+.movie-heatmap-matrix .movie-heatmap-scroll { flex: 1 1 auto; min-width: 0; }
+.movie-heatmap-daytile.is-mcell {
+  display: flex; align-items: center; justify-content: center; aspect-ratio: auto; height: 12px; min-height: 0; padding: 0;
+  border-radius: 3px; font-size: 0.64em; font-weight: 600; line-height: 1; cursor: pointer;
+}
+.movie-heatmap-daytile.is-mcell.is-blank { background: transparent; box-shadow: none; cursor: default; }
+.movie-heatmap-daytile.is-mcell:not(.is-blank):hover { box-shadow: 0 0 0 1.5px rgba(var(--mg-fg), 0.7); }
