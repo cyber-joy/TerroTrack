@@ -84,10 +84,48 @@ An [Obsidian](https://obsidian.md) plugin for tracking **Movies, TV Shows & Anim
 
 ### Searching Your Library
 
-Search your collection by title, director (creator, for TV), and cast.
+Search your collection by title, director (creator, for TV), and cast. Anime also searches studio and voice actor.
 > Title is always searched. Director and Cast can be toggled in **Gallery Settings** (both are on by default).
 
 ![](Attachments/demo-2.gif)
+
+### Collections
+
+Open the **Collections** tab and create a list. Add titles from a title's details (the **Collection** button), or select several posters and use **Collection** in the selection bar. A collection can mix movies, TV shows and anime.
+
+### Showing part of your library in a note
+
+A block with no options is the full library. Add options and it becomes a filtered list you can place anywhere in your notes:
+
+````
+```terro-movie
+type: movies
+status: watched
+genre: Drama
+sort: rating
+limit: 10
+title: My top dramas
+```
+````
+
+| Option | Values |
+| ------ | ------ |
+| `type` | `movies` (default for `terro-movie`), `tv` (default for `terro-tv`), or `all` |
+| `status` | `to watch`, `watching`, `watched`, `trashed` |
+| `favorite` | `true` |
+| `genre` | one or more genres, comma-separated |
+| `year` | `2010`, a list `1999, 2004`, or a range `2010-2020` |
+| `language` | language code, e.g. `en` |
+| `collection` | the name of one of your collections |
+| `person` | a director, creator, or actor |
+| `min_rating`, `min_my_rating` | minimum TMDB rating / your own rating |
+| `search` | text to find in the title |
+| `sort` | `added` (default), `title`, `year`, `rating`, `myrating`, `runtime` |
+| `dir` | `asc` or `desc` |
+| `limit` | maximum number of titles |
+| `title` | heading shown above the list |
+
+> Filtered blocks list movies and TV shows. Anime lives in the full library (the **Anime** tab).
 
 ---
 
@@ -181,7 +219,7 @@ YourVault/
 - Go to **Settings → TerroTrack → TMDB API key**.
 - Paste your key.
 
-Don't have one? See [How to get your free TMDB API key](#How-to-get-your-free-TMDB-API-key).
+Don't have one? See [How to get your free TMDB API key](#How-to-get-your-free-TMDB-API-key). Anime does not need it.
 
 ### 2. Open your Library
 
@@ -199,15 +237,17 @@ or
 ```
 ````
 
-Both render the same interface with **Movies / TV Shows** tabs. The only difference is which tab opens first.
+Both render the same interface with **Movies · TV Shows · Anime · Collections · Discover** tabs. The only difference is which tab opens first.
 
 ![](Attachments/demo-3.gif)
 
+You can also add titles from the command palette with **Add movie** and **Add TV show**.
+
 ### 3. Add your first title
 
-Click `+ Add Movie` or `+ Add Show`.
+Click `+ Add Movie`, `+ Add Show`, or add an anime.
 
-Search TMDB and select a result, or use **OR ENTER MANUALLY** for titles that aren't available on TMDB.
+Search and select a result, or use **OR ENTER MANUALLY** for titles that aren't available online.
 
 ---
 
@@ -215,13 +255,17 @@ Search TMDB and select a result, or use **OR ENTER MANUALLY** for titles that ar
 
 By default, TerroTrack writes three files to your vault root:
 
-| File            | Contents                                 |
-| --------------- | ---------------------------------------- |
-| `movies.json`   | Your movie library                       |
-| `tvshows.json`  | Your TV library                          |
-| `activity.json` | Daily activity counts behind the heatmap |
+| File                | Contents                                 |
+| ------------------- | ---------------------------------------- |
+| `movies.json`       | Your movie library                       |
+| `tvshows.json`      | Your TV library                          |
+| `anime.json`        | Your anime library                       |
+| `collections.json`  | Your collections                         |
+| `activity.json`     | Daily activity counts behind the heatmap |
 
-All three paths can be changed in **Settings → TerroTrack**.
+Markdown notes created with the **MD** button go in a **TerroTrack Notes** folder (change it in **Settings → TerroTrack → MD notes folder**). Plugin settings are kept in the plugin's own `data.json`.
+
+All file paths can be changed in **Settings → TerroTrack**.
 
 Everything is plain JSON — you can open, edit, or move it outside Obsidian.
 
@@ -287,6 +331,39 @@ Everything is plain JSON — you can open, edit, or move it outside Obsidian.
 
 </details>
 
+<details>
+<summary><strong>Anime entry example</strong></summary>
+
+```json
+{
+  "id": 5114,
+  "anilist_id": 5114,
+  "mal_id": 5114,
+  "name": "Fullmetal Alchemist: Brotherhood",
+  "title_english": "Fullmetal Alchemist: Brotherhood",
+  "title_romaji": "Hagane no Renkinjutsushi: FULLMETAL ALCHEMIST",
+  "year": "2009",
+  "rating": "9.1",
+  "rating_source": "AniList",
+  "myRating": "10",
+  "status": "watching",
+  "format": "TV",
+  "show_status": "Ended",
+  "episode_runtime": 24,
+  "genres": "Action, Adventure, Drama, Fantasy",
+  "creators": "Bones",
+  "overview": "...",
+  "notes": "",
+  "number_of_seasons": 1,
+  "number_of_episodes": 64,
+  "episodesWatched": 20
+}
+```
+
+For a title that is still airing, `total_known` is `false` and `episodes_aired` holds the number of episodes out so far.
+
+</details>
+
 ---
 
 ## 💾 Backup & Import
@@ -298,6 +375,8 @@ TerroTrack supports library backup and import through **Gallery Settings → Dat
 - **TerroTrack** — Import previous CSV backups.
 - **IMDb** — Import movie and TV exports.
 - **Letterboxd** — Import movie exports, including ratings and watchlists.
+- **MyAnimeList** — Import an XML export into your anime library, or export your library back to XML.
+- **AniList** — Import a public AniList list by username.
 
 ---
 
@@ -306,6 +385,8 @@ TerroTrack supports library backup and import through **Gallery Settings → Dat
 Download the latest release and replace the existing `TerroTrack` plugin folder with the new version.
 
 Your library data will remain intact.
+
+To refresh a title's information, open it and press **Update**, or select several titles and use **Update** in the selection bar. **Update database** in Gallery Settings refreshes the whole library. Your status, notes, ratings, and progress are kept.
 
 ---
 
@@ -318,7 +399,7 @@ Your library data will remain intact.
 
 The key is stored in the plugin's `data.json` and stays on your machine.
 
-Without it, the plugin still works — manual entry, gallery, filters, sorting, notes, ratings, backups, and native-backup imports all function. You lose TMDB search, Discover, metadata updates, and IMDb/Letterboxd enrichment.
+Without it, the plugin still works — manual entry, gallery, filters, sorting, notes, ratings, backups, native-backup imports, and the whole anime side (AniList and MyAnimeList search, Discover, updates) all function. You lose TMDB search for movies and TV, their Discover rows, metadata updates, and IMDb/Letterboxd enrichment.
 
 ---
 
