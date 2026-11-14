@@ -1,6 +1,6 @@
 # TerroTrack
 
-An [Obsidian](https://obsidian.md) plugin for tracking **Movies & TV Shows**. Discover trending titles and add them to your collection directly from the plugin. Your data is stored as plain JSON and can be exported as CSV.
+An [Obsidian](https://obsidian.md) plugin for tracking **Movies, TV Shows & Anime**. Discover what to watch next, build collections, and keep everything in your own vault. Your data is stored as plain JSON and can be exported as CSV.
 
 ![](Attachments/movie_library.png)
 ![](Attachments/tv_library.png)
@@ -12,6 +12,7 @@ An [Obsidian](https://obsidian.md) plugin for tracking **Movies & TV Shows**. Di
 <p align="center">
   <a href="#-features"><strong>✨ Features</strong></a> ·
   <a href="#-usage"><strong>📖 Usage</strong></a> ·
+  <a href="#-anime"><strong>🎌 Anime</strong></a> ·
   <a href="#-screenshots"><strong>📸 Screenshots</strong></a> ·
   <a href="#-installation"><strong>📦 Installation</strong></a> ·
   <a href="#quick-start"><strong>🚀 Quick Start</strong></a> ·
@@ -19,6 +20,7 @@ An [Obsidian](https://obsidian.md) plugin for tracking **Movies & TV Shows**. Di
   <a href="#-backup--import"><strong>💾 Backup & Import</strong></a> ·
   <a href="#-updating"><strong>🔄 Updating</strong></a> ·
   <a href="#-compatibility"><strong>📱 Compatibility</strong></a> ·
+  <a href="#-credits"><strong>🙏 Credits</strong></a> ·
   <a href="#-license"><strong>📄 License</strong></a>
 </p>
 
@@ -33,32 +35,42 @@ An [Obsidian](https://obsidian.md) plugin for tracking **Movies & TV Shows**. Di
 - ❤️ Favourites — one-tap heart on posters, plus a favourites-only toolbar filter
 - ⭐ Personal star ratings, 5 stars at half-star precision
 - 📝 Personal notes with a preview card and a full reading/editing layer
-- 📺 TV progress tracks seasons and episodes together, with a per-day logging date
+- 📄 **MD** button — open or create a real Markdown note for any title, with its details as properties
+- 📚 **Collections** — group movies, shows and anime into your own lists
+- ☑️ Multi-select — set status, favourite, update, add to a collection, or delete many titles at once
+- 🎲 **Pick for me** — a random title from your To Watch list, filtered by genre and length
 
-**Discover** *(requires a TMDB API key)*
+**Progress**
+- 📺 TV and anime progress tracks seasons and episodes together
+- ⏳ Time left — remaining episodes × episode length, shown beside the progress bar
+- 📅 Per-day logging date, so you can log past viewing on the day it happened
+- 🔔 **This week** bell — new episodes and releases for the titles in your library (anime uses its AniList airing schedule)
+
+**Discover**
 - ✨ Picked for you — recommendations built from your own ratings, genres, and watch history
 - 🔥 Trending this week
-- 🆕 In theaters now / On the air
-- 📅 Coming soon — upcoming releases and new series
+- 📅 Upcoming (movies) / Coming soon (TV and anime) · 📡 On the air (TV) / Airing now (anime)
+- Movies and TV Discover need a TMDB API key. **Anime Discover uses AniList and needs no key.**
 
 **Search, filter, sort**
-- 🔍 Search by title, director/creator, and cast
-- 🏷️ Filter by genre, year, language, TMDB rating, and your own rating (+ series status on TV)
+- 🔍 Search by title, director/creator, and cast (anime: studio and voice actor)
+- 🏷️ Filter by genre, year, language, TMDB rating, and your own rating (+ series status on TV, **format** on anime: TV, Movie, ONA, OVA, Special)
 - 📆 Dual-handle year picker with Range and Individual modes
-- ↕️ Sort by Recently added, Title, Year, Rating, or Runtime, ascending or descending
+- ↕️ Sort by Recently added, Title, Year, Rating, My rating, or Runtime, ascending or descending
 
 **Stats**
+- 🔀 One window with a **Movies / TV / Anime** switch that changes every section
 - ⏱️ Total watch time with a playful tier badge
-- 🍩 Watched / Watching / To Watch / Trashed breakdown as a donut
-- 🥧 Genre distribution as a labelled pie
-- 🎯 Viewing habits — favourite year, top director/creator, most-seen actor — click to jump to those titles
-- 🗓️ GitHub-style activity heatmap with Week / Month / Year / All-time views, a Movies/TV/All filter, and current/longest streak tiles
+- 📊 Watched / Watching / To Watch / Trashed breakdown with percentages
+- 🎯 Genre breakdown and viewing habits — favourite year, top director/creator/studio, most-seen actor — click to jump to those titles
+- 🗓️ GitHub-style activity heatmap with Week / Month / Year / All-time views and current/longest streak tiles. All-time shows years across and months down, so any number of years stays one compact table
 
 **Data**
 - 📄 Plain JSON storage — inspect, edit, or move it outside Obsidian
 - 💾 CSV backups (full round-trip) and TXT exports
-- 📥 Import from TerroTrack backups, IMDb, and Letterboxd (movies only)
-- 🔄 Update database — re-fetch TMDB metadata while keeping your status, notes, ratings, and progress
+- 📥 Import from TerroTrack backups, IMDb, Letterboxd (movies only), MyAnimeList and AniList
+- 📤 Export anime to a MyAnimeList XML file
+- 🔄 Update database — re-fetch metadata while keeping your status, notes, ratings, and progress
 
 ---
 
@@ -314,6 +326,22 @@ Without it, the plugin still works — manual entry, gallery, filters, sorting, 
 
 * **Desktop:** Windows · macOS · Linux
 * **Mobile:** Android · iOS
+
+---
+
+## 🙏 Credits
+
+TerroTrack is an independent project. It is not affiliated with, or endorsed by, any of the services below.
+
+<img src="Attachments/tmdb-logo.svg" alt="TMDB logo" width="120" />
+
+
+**This product uses the TMDB API but is not endorsed or certified by TMDB.**
+
+- 🎬 Movie and TV information and images come from [TMDB](https://www.themoviedb.org) (The Movie Database).
+- 🎌 Anime information, images and airing schedules come from [AniList](https://anilist.co) and [MyAnimeList](https://myanimelist.net). [Jikan](https://jikan.moe), an unofficial MyAnimeList API, is used only as a fallback.
+- 🖼️ Posters and artwork belong to their respective rights holders. They are loaded from these services when shown and are not stored in your vault.
+- ✏️ Many of the small icons are based on [Lucide](https://lucide.dev) (ISC licence) and [Feather](https://feathericons.com) (MIT licence).
 
 ---
 
