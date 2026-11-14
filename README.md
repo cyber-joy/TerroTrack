@@ -12,7 +12,6 @@ An [Obsidian](https://obsidian.md) plugin for tracking **Movies, TV Shows & Anim
 <p align="center">
   <a href="#-features"><strong>✨ Features</strong></a> ·
   <a href="#-usage"><strong>📖 Usage</strong></a> ·
-  <a href="#-anime"><strong>🎌 Anime</strong></a> ·
   <a href="#-screenshots"><strong>📸 Screenshots</strong></a> ·
   <a href="#-installation"><strong>📦 Installation</strong></a> ·
   <a href="#quick-start"><strong>🚀 Quick Start</strong></a> ·
@@ -45,6 +44,12 @@ An [Obsidian](https://obsidian.md) plugin for tracking **Movies, TV Shows & Anim
 - ⏳ Time left — remaining episodes × episode length, shown beside the progress bar
 - 📅 Per-day logging date, so you can log past viewing on the day it happened
 - 🔔 **This week** bell — new episodes and releases for the titles in your library (anime uses its AniList airing schedule)
+
+**Anime**
+- 🔎 Search queries AniList and MyAnimeList together and merges the results — no TMDB key needed
+- 🌐 Titles shown in English, Romaji or Native (**Settings → TerroTrack → Anime title language**)
+- 🎙️ Voice cast with the actor and the character they play, plus related and similar titles
+- 📡 Airing titles show how many episodes have aired so far
 
 **Discover**
 - ✨ Picked for you — recommendations built from your own ratings, genres, and watch history
@@ -401,6 +406,15 @@ The key is stored in the plugin's `data.json` and stays on your machine.
 
 Without it, the plugin still works — manual entry, gallery, filters, sorting, notes, ratings, backups, native-backup imports, and the whole anime side (AniList and MyAnimeList search, Discover, updates) all function. You lose TMDB search for movies and TV, their Discover rows, metadata updates, and IMDb/Letterboxd enrichment.
 
+---
+
+## Optional: MyAnimeList client ID
+ 
+By default, MyAnimeList lookups go through [Jikan](https://jikan.moe), an unofficial service that can be slow. A free client ID makes the plugin use MyAnimeList's official API instead. Anime search through AniList works without it.
+ 
+1. Go to [myanimelist.net/apiconfig](https://myanimelist.net/apiconfig) and create an app.
+2. Copy its **Client ID**.
+3. Paste it into **Settings → TerroTrack → MyAnimeList client ID (optional)**.
 ---
 
 ## 📱 Compatibility
